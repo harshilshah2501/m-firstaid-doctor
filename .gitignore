@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# macOS
+.DS_Store
+*.dmg
+*.pkg
+
+# Windows
+*.exe
+*.msi
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Local DB and logs (don't commit user data)
+*.db
+*.db-wal
+*.db-shm
+*.log
+firstaid.toml
+
+# ONNX models (large binary files — ship separately)
+models/*.onnx
+models/*.ort
+
+# Test output
+/tmp/
+/tests/output/

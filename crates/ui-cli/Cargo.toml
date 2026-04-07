@@ -1,0 +1,9 @@
+[package]
+name    = "ui-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+detector    = { path = "../detector" }
+remediation = { path = "../remediation" }
+serde_json  = { workspace = true }

@@ -1,0 +1,88 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "018ede00-1111-7c91-0000-000000000001",
+  "collected_at": "2025-04-07T14:00:00Z",
+  "normalized_at": "2025-04-07T14:00:00Z",
+  "platform": "macos",
+  "cpu": {
+    "usage_pct": 88.4,
+    "core_count": 8,
+    "user_pct": 82.1,
+    "system_pct": 6.3,
+    "idle_pct": 11.6,
+    "top_process": {
+      "pid": 9321,
+      "name": "node",
+      "cpu_pct": 84.7,
+      "rss_mb": 892,
+      "is_system": false
+    }
+  },
+  "memory": {
+    "total_mb": 16384,
+    "available_mb": 4200,
+    "used_pct": 74.4,
+    "swap_total_mb": 4096,
+    "swap_used_mb": 128,
+    "swap_used_pct": 3.1,
+    "pressure": "Warning",
+    "top_process": {
+      "pid": 9321,
+      "name": "node",
+      "cpu_pct": 84.7,
+      "rss_mb": 892,
+      "is_system": false
+    }
+  },
+  "disks": [
+    {
+      "mount_point": "/",
+      "is_system": true,
+      "free_pct": 28.3,
+      "free_bytes": 139924144128,
+      "total_bytes": 494384795648,
+      "disk_type": "SSD",
+      "smart_status": "Ok"
+    }
+  ],
+  "network": {
+    "reachable": true,
+    "ipv4": "192.168.1.42",
+    "ipv6": null,
+    "wifi_ssid": "HomeNetwork",
+    "wifi_signal_dbm": -58,
+    "wifi_noise_dbm": -95,
+    "dns_servers": ["192.168.1.1"],
+    "vpn_active": false,
+    "proxy_configured": false
+  },
+  "thermal": {
+    "state": "Fair",
+    "cpu_temp_celsius": 78.0,
+    "gpu_temp_celsius": 61.0,
+    "fan_speed_rpm": 3800
+  },
+  "battery": {
+    "present": true,
+    "charge_pct": 71.0,
+    "charging": false,
+    "health_pct": 91.0,
+    "cycle_count": 224,
+    "current_ma": -3800,
+    "time_remaining_min": 62
+  },
+  "startup": null,
+  "updates": {
+    "pending_reboot_required": false,
+    "recent_update_detected": false,
+    "update_failed": false
+  },
+  "crashes": {
+    "count_1h": 0,
+    "count_24h": 0,
+    "count_7d": 0,
+    "last_process_name": null,
+    "last_exception_type": null
+  },
+  "services": []
+}

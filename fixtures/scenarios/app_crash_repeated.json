@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "018ede00-6666-7c91-0000-000000000001",
+  "collected_at": "2025-04-07T20:00:00Z",
+  "normalized_at": "2025-04-07T20:00:00Z",
+  "platform": "macos",
+  "cpu": { "usage_pct": 18.4, "core_count": 8, "user_pct": 12.1, "system_pct": 6.3, "idle_pct": 81.6, "top_process": null },
+  "memory": { "total_mb": 16384, "available_mb": 7800, "used_pct": 52.4, "swap_total_mb": 4096, "swap_used_mb": 0, "swap_used_pct": 0.0, "pressure": "Normal", "top_process": null },
+  "disks": [
+    { "mount_point": "/", "is_system": true, "free_pct": 31.2, "free_bytes": 154346766336, "total_bytes": 494384795648, "disk_type": "SSD", "smart_status": "Ok" }
+  ],
+  "network": { "reachable": true, "ipv4": "192.168.1.42", "ipv6": null, "wifi_ssid": "HomeNetwork", "wifi_signal_dbm": -58, "wifi_noise_dbm": null, "dns_servers": ["8.8.8.8"], "vpn_active": false, "proxy_configured": false },
+  "thermal": { "state": "Normal", "cpu_temp_celsius": 55.0, "gpu_temp_celsius": null, "fan_speed_rpm": 2000 },
+  "battery": { "present": true, "charge_pct": 88.0, "charging": true, "health_pct": 91.0, "cycle_count": 312, "current_ma": 1800, "time_remaining_min": null },
+  "startup": null,
+  "updates": { "pending_reboot_required": false, "recent_update_detected": true, "update_failed": false },
+  "crashes": {
+    "count_1h": 2,
+    "count_24h": 7,
+    "count_7d": 12,
+    "last_process_name": "Slack",
+    "last_exception_type": "EXC_BAD_ACCESS"
+  },
+  "services": []
+}

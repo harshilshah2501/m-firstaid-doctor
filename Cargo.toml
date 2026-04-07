@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agent-core",
+    "crates/collectors",
+    "crates/collectors-mac",
+    "crates/collectors-win",
+    "crates/signal-normalizer",
+    "crates/feature-extractor",
+    "crates/trigger-engine",
+    "crates/detector",
+    "crates/inference",
+    "crates/remediation",
+    "crates/policy",
+    "crates/storage",
+    "crates/audit",
+    "crates/ui-cli",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+authors      = ["m-firstaid-doctor contributors"]
+license      = "MIT"
+rust-version = "1.78"
+
+# Shared dependency versions — pin here, reference with { workspace = true }
+[workspace.dependencies]
+# Serialization
+serde        = { version = "1.0", features = ["derive"] }
+serde_json   = "1.0"
+
+# Async runtime
+tokio        = { version = "1.37", features = ["full"] }
+
+# Error handling
+thiserror    = "1.0"
+anyhow       = "1.0"
+
+# Logging / tracing
+tracing          = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# IDs
+uuid = { version = "1.8", features = ["v4", "serde"] }
+
+# System info (cross-platform baseline)
+sysinfo = "0.30"
+
+# SQLite
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# ONNX Runtime (lazy-load, not always linked)
+# ort = { version = "2.0", features = ["load-dynamic"] }
+
+# Config
+toml = "0.8"
+
+# Testing
+tempfile = "3"
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = true    # strip symbols → smaller binary
+
+[profile.dev]
+opt-level = 1           # faster rebuild without full debug overhead

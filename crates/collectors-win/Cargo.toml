@@ -1,0 +1,14 @@
+[package]
+name    = "collectors-win"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+collectors = { path = "../collectors" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
+# windows = { version = "0.56", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper"] }
+# wmi = "0.14"

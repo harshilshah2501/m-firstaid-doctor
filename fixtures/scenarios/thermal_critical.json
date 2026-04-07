@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "018ede00-5555-7c91-0000-000000000001",
+  "collected_at": "2025-04-07T18:00:00Z",
+  "normalized_at": "2025-04-07T18:00:00Z",
+  "platform": "macos",
+  "cpu": { "usage_pct": 95.0, "core_count": 8, "user_pct": 85.0, "system_pct": 10.0, "idle_pct": 5.0,
+    "top_process": { "pid": 5555, "name": "ffmpeg", "cpu_pct": 91.2, "rss_mb": 1200, "is_system": false } },
+  "memory": { "total_mb": 16384, "available_mb": 3200, "used_pct": 80.5, "swap_total_mb": 4096, "swap_used_mb": 512, "swap_used_pct": 12.5, "pressure": "Warning", "top_process": null },
+  "disks": [
+    { "mount_point": "/", "is_system": true, "free_pct": 22.1, "free_bytes": 109327769600, "total_bytes": 494384795648, "disk_type": "SSD", "smart_status": "Ok" }
+  ],
+  "network": { "reachable": true, "ipv4": "192.168.1.42", "ipv6": null, "wifi_ssid": "HomeNetwork", "wifi_signal_dbm": -60, "wifi_noise_dbm": null, "dns_servers": ["8.8.8.8"], "vpn_active": false, "proxy_configured": false },
+  "thermal": {
+    "state": "Critical",
+    "cpu_temp_celsius": 103.5,
+    "gpu_temp_celsius": 88.0,
+    "fan_speed_rpm": 6200
+  },
+  "battery": { "present": true, "charge_pct": 45.0, "charging": false, "health_pct": 82.0, "cycle_count": 521, "current_ma": -4100, "time_remaining_min": 38 },
+  "startup": null,
+  "updates": { "pending_reboot_required": false, "recent_update_detected": false, "update_failed": false },
+  "crashes": { "count_1h": 0, "count_24h": 0, "count_7d": 0, "last_process_name": null, "last_exception_type": null },
+  "services": []
+}

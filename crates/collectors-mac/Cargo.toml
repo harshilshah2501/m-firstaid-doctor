@@ -1,0 +1,12 @@
+[package]
+name    = "collectors-mac"
+version.workspace = true
+edition.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+collectors = { path = "../collectors" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }

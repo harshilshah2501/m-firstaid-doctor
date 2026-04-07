@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "018ede00-0000-7c91-0000-000000000001",
+  "collected_at": "2025-04-07T12:00:00Z",
+  "normalized_at": "2025-04-07T12:00:00Z",
+  "platform": "macos",
+  "cpu": {
+    "usage_pct": 12.3,
+    "core_count": 8,
+    "user_pct": 8.1,
+    "system_pct": 4.2,
+    "idle_pct": 87.7,
+    "top_process": {
+      "pid": 1234,
+      "name": "Safari",
+      "cpu_pct": 5.2,
+      "rss_mb": 312,
+      "is_system": false
+    }
+  },
+  "memory": {
+    "total_mb": 16384,
+    "available_mb": 6800,
+    "used_pct": 58.5,
+    "swap_total_mb": 4096,
+    "swap_used_mb": 0,
+    "swap_used_pct": 0.0,
+    "pressure": "Normal",
+    "top_process": {
+      "pid": 1234,
+      "name": "Safari",
+      "cpu_pct": 5.2,
+      "rss_mb": 512,
+      "is_system": false
+    }
+  },
+  "disks": [
+    {
+      "mount_point": "/",
+      "is_system": true,
+      "free_pct": 42.1,
+      "free_bytes": 208304775168,
+      "total_bytes": 494384795648,
+      "disk_type": "SSD",
+      "smart_status": "Ok"
+    }
+  ],
+  "network": {
+    "reachable": true,
+    "ipv4": "192.168.1.42",
+    "ipv6": null,
+    "wifi_ssid": "HomeNetwork",
+    "wifi_signal_dbm": -55,
+    "wifi_noise_dbm": -95,
+    "dns_servers": ["192.168.1.1", "8.8.8.8"],
+    "vpn_active": false,
+    "proxy_configured": false
+  },
+  "thermal": {
+    "state": "Normal",
+    "cpu_temp_celsius": 52.0,
+    "gpu_temp_celsius": 48.0,
+    "fan_speed_rpm": 1800
+  },
+  "battery": {
+    "present": true,
+    "charge_pct": 82.0,
+    "charging": false,
+    "health_pct": 94.0,
+    "cycle_count": 187,
+    "current_ma": -1200,
+    "time_remaining_min": 210
+  },
+  "startup": {
+    "items_count": 8,
+    "launch_agents_count": 8,
+    "launch_daemons_count": 22,
+    "run_key_items_count": null,
+    "items": []
+  },
+  "updates": {
+    "pending_reboot_required": false,
+    "recent_update_detected": false,
+    "update_failed": false
+  },
+  "crashes": {
+    "count_1h": 0,
+    "count_24h": 0,
+    "count_7d": 0,
+    "last_process_name": null,
+    "last_exception_type": null
+  },
+  "services": []
+}
