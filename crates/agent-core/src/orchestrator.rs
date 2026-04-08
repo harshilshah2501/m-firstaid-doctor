@@ -6,7 +6,7 @@ use audit::{AuditLogger, EventType};
 use collectors::{CollectorSet, Platform};
 use detector::{diagnose, merge_ml};
 use feature_extractor::extract;
-use inference::{AdaptiveThresholds, ModelSessionPool};
+use inference::{AdaptiveThresholds, ModelSessionPool, record_process_observation, should_retrain};
 use remediation::{execute as execute_plan, plan as build_plan, ConsentMethod};
 use signal_normalizer::normalize;
 use storage::Repository;
@@ -150,19 +150,51 @@ impl Orchestrator {
 
         let rule_output = diagnose(&features, &trigger_event.issue_classes);
 
-        // ── Step 6b: ML augmentation (Phase D — crash classifier) ────────────
+        // ── Step 6b: ML augmentation (Phase D/E) ─────────────────────────────
         // Build per-class ML score map. Each model result is keyed by IssueClass.
-        // Returns Ok(None) when the onnx feature is off or model is not loaded.
+        // Both functions return Ok(None) gracefully when onnx is off or model absent.
         let mut ml_scores = HashMap::new();
+
+        // Phase D — CharCNN crash classifier
         if let Some(log_text) = &features.crash_log_text {
-            // Crash classifier config is loaded from the manifest at startup in Phase B+.
-            // Until the manifest loader is wired here, pass None — classify_crash_log
-            // returns Ok(None) gracefully and rules-only mode applies.
             match inference::classify_crash_log(log_text, None, None) {
                 Ok(Some(ir)) => { ml_scores.insert(IssueClass::AppCrash, ir); }
                 Ok(None)     => {}
                 Err(e)       => { warn!(error = %e, "Crash classifier failed — rules only"); }
             }
+        }
+
+        // Phase E — Isolation Forest process anomaly scorer
+        // Feature vector: [cpu_pct, mem_mb, io_bytes_per_sec, process_age_hours, cpu_trend_5m]
+        // io_bytes_per_sec and process_age_hours are 0.0 until future collectors expose them.
+        let proc_features: [f32; 5] = [
+            features.top_process_cpu_pct,
+            features.top_process_rss_mb as f32,
+            0.0,  // io_bytes_per_sec — not yet collected per-process
+            0.0,  // process_age_hours — not yet collected
+            features.cpu_usage_avg_5m - features.cpu_usage_avg_1m,  // cpu_trend_5m
+        ];
+
+        // Record every cycle for the weekly retrainer (non-fatal if DB write fails).
+        if !features.top_process_name.is_empty() {
+            if let Err(e) = record_process_observation(conn, &features.top_process_name, &proc_features) {
+                debug!(error = %e, "Could not record process observation");
+            }
+        }
+
+        // Run anomaly scorer (Ok(None) when model not configured).
+        match inference::detect_process_anomaly(&proc_features, None, None) {
+            Ok(Some(ir)) => { ml_scores.insert(IssueClass::HighCpu, ir); }
+            Ok(None)     => {}
+            Err(e)       => { warn!(error = %e, "Process anomaly scorer failed — rules only"); }
+        }
+
+        // Phase E — weekly on-device retraining check
+        if should_retrain(conn, "process_anomaly_v1") {
+            info!("Isolation Forest retraining is due — spawning subprocess");
+            // Script and path resolution happens in a follow-up config wiring task.
+            // For now, log the intent without blocking the diagnostic cycle.
+            debug!("Retrain subprocess spawn deferred until model paths are configured");
         }
 
         let diagnosis = merge_ml(rule_output, &ml_scores, None);

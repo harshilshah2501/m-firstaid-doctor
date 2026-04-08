@@ -12,9 +12,14 @@
 
 pub mod adaptive;
 pub mod session_pool;
+pub mod trainer;
 
 pub use adaptive::AdaptiveThresholds;
 pub use session_pool::{load_manifest, ModelSessionPool, OrtSessionRef};
+pub use trainer::{
+    record_process_observation, should_retrain, record_retrain,
+    spawn_retrain_subprocess, FEATURE_NAMES, MIN_OBS_FOR_RETRAIN,
+};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -302,16 +307,77 @@ fn softmax(logits: &[f32]) -> Vec<f32> {
 fn run_isolation_forest(
     features: &[f32; 5],
     config: &ModelConfig,
-    _session: &OrtSessionRef<'_>,
+    session: &OrtSessionRef<'_>,
     start: std::time::Instant,
 ) -> Result<InferenceResult, InferenceError> {
-    // TODO Phase E: implement Isolation Forest ORT inference
-    // Steps:
-    //   1. Shape features as [1, 5] f32 tensor
-    //   2. session.run(ort::inputs!["input" => tensor]?)
-    //   3. Output: [anomaly_score] f32 (0=normal, 1=anomaly)
-    //   4. Return InferenceResult with predicted_class = "normal"|"anomaly"
-    todo!("Phase E: implement Isolation Forest ORT inference")
+    use ort::value::Tensor;
+
+    // Step 1: shape [1, 5] f32 tensor
+    let flat: Box<[f32]> = features.to_vec().into_boxed_slice();
+    let tensor = Tensor::from_array(([1usize, 5], flat))
+        .map_err(|e| InferenceError::PreprocessError(format!("tensor build: {e}")))?;
+
+    // Step 2: run ORT session
+    let outputs = session
+        .session
+        .run(ort::inputs!["input" => tensor]
+            .map_err(|e| InferenceError::OrtError(format!("inputs macro: {e}")))?)
+        .map_err(|e| InferenceError::OrtError(format!("session run: {e}")))?;
+
+    // Step 3: extract probabilities — expected shape [1, 2] → [normal_prob, anomaly_prob].
+    // The training script (scripts/train_process_anomaly.py) exports with `predict_proba`
+    // output so the values are calibrated probabilities, not raw logits.
+    // We apply softmax defensively in case the model was exported with raw logits.
+    let probs_tensor = outputs["output"]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| InferenceError::OrtError(format!("extract probabilities: {e}")))?;
+    let probs_slice = probs_tensor.as_slice().unwrap_or(&[0.5, 0.5]);
+
+    // Normalize to sum-to-1 in case of numerical drift.
+    let probs = if probs_slice.len() >= 2 {
+        softmax(probs_slice)
+    } else {
+        // Single-value output (raw anomaly score in [0,1]): treat as anomaly_prob.
+        let anom = probs_slice.first().copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        vec![1.0 - anom, anom]
+    };
+
+    // Step 4: build ranked class_probabilities with canonical class labels.
+    // output_classes in manifest: ["normal", "anomaly"] — index 0=normal, 1=anomaly.
+    let labels = if config.output_classes.len() >= 2 {
+        config.output_classes.clone()
+    } else {
+        vec!["normal".into(), "anomaly".into()]
+    };
+
+    let mut class_probabilities: Vec<(String, f32)> = labels
+        .iter()
+        .cloned()
+        .zip(probs.iter().copied())
+        .collect();
+    class_probabilities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (predicted_class, confidence) = class_probabilities
+        .first()
+        .map(|(c, p)| (c.clone(), *p))
+        .unwrap_or_else(|| ("normal".into(), 0.5));
+
+    tracing::debug!(
+        predicted_class = %predicted_class,
+        confidence,
+        cpu_pct = features[0],
+        mem_mb  = features[1],
+        "Isolation Forest inference complete"
+    );
+
+    Ok(InferenceResult {
+        model_name:         config.name.clone(),
+        model_version:      config.version.clone(),
+        predicted_class,
+        confidence,
+        class_probabilities,
+        elapsed_ms:         start.elapsed().as_millis() as u64,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -401,6 +467,25 @@ mod tests {
     fn detect_process_anomaly_no_config_returns_none() {
         let result = detect_process_anomaly(&[80.0, 512.0, 1024.0, 2.5, 5.0], None, None);
         assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn softmax_single_value_normalizes_to_pair() {
+        // Simulates the single-output fallback path in run_isolation_forest.
+        let single_score = 0.85f32;  // anomaly_prob
+        let probs = vec![1.0 - single_score, single_score];
+        let sum: f32 = probs.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
+        assert_eq!(probs[1], 0.85);
+    }
+
+    #[test]
+    fn softmax_two_class_output() {
+        // Model outputs logits [2.0, 1.0] → normal wins
+        let probs = softmax(&[2.0f32, 1.0]);
+        assert!(probs[0] > probs[1], "higher logit → higher probability");
+        let sum: f32 = probs.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use tracing::debug;
 pub fn apply_all(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(MIGRATION_001)?;
     conn.execute_batch(MIGRATION_002)?;
+    conn.execute_batch(MIGRATION_003)?;
     debug!("Migrations applied");
     Ok(())
 }
@@ -116,4 +117,40 @@ CREATE INDEX IF NOT EXISTS idx_features_label ON feature_vectors(label);
 
 INSERT OR IGNORE INTO schema_version(version, applied_at)
 VALUES (2, datetime('now'));
+"#;
+
+/// Migration 003 — per-process observation history for Isolation Forest retraining
+const MIGRATION_003: &str = r#"
+-- Rolling process observation log used by the on-device Isolation Forest trainer.
+-- One row per collection cycle per top-CPU process. Pruned to 30 days automatically.
+-- Feature vector layout matches inference::detect_process_anomaly:
+--   [cpu_pct, mem_mb, io_bytes_per_sec, process_age_hours, cpu_trend_5m]
+CREATE TABLE IF NOT EXISTS process_observations (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    collected_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    process_name     TEXT    NOT NULL,
+    cpu_pct          REAL    NOT NULL,
+    mem_mb           REAL    NOT NULL,
+    io_bytes_per_sec REAL    NOT NULL DEFAULT 0.0,
+    process_age_hours REAL   NOT NULL DEFAULT 0.0,
+    cpu_trend_5m     REAL    NOT NULL DEFAULT 0.0
+);
+-- Fast lookup for the trainer: per-process chronological history
+CREATE INDEX IF NOT EXISTS idx_proc_obs_name_time
+    ON process_observations(process_name, collected_at DESC);
+-- Fast pruning by age
+CREATE INDEX IF NOT EXISTS idx_proc_obs_collected
+    ON process_observations(collected_at DESC);
+
+-- Track the last time each model was retrained on-device.
+-- Used by the trainer to decide whether retraining is due (default: weekly).
+CREATE TABLE IF NOT EXISTS model_retrain_log (
+    model_name    TEXT PRIMARY KEY,
+    last_trained_at TEXT NOT NULL DEFAULT (datetime('now')),
+    obs_count     INTEGER NOT NULL DEFAULT 0,   -- rows used for last train
+    onnx_sha256   TEXT                           -- SHA-256 of produced model file
+);
+
+INSERT OR IGNORE INTO schema_version(version, applied_at)
+VALUES (3, datetime('now'));
 "#;
