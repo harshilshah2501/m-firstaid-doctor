@@ -156,10 +156,16 @@ pub fn normalize(raw: &RawSnapshot) -> NormalizedSignalSnapshot {
         },
         crashes: NormalizedCrashes {
             count_1h: 0,
-            count_24h: 0,
+            count_24h: raw.platform_specific.windows
+                .as_ref()
+                .and_then(|w| w.event_log_crash_count_24h)
+                .unwrap_or(0),
             count_7d: 0,
             last_process_name: None,
             last_exception_type: None,
+            last_crash_log_text: raw.platform_specific.macos
+                .as_ref()
+                .and_then(|m| m.last_crash_log_text.clone()),
         },
         services: Vec::new(),
     }

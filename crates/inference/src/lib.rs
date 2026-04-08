@@ -210,21 +210,90 @@ pub struct TelemetryAnomalyScore {
 
 // ── Phase D: CharCNN crash classifier implementation ───────────────────────────
 
+/// Preprocess crash log text into a character-level one-hot tensor.
+///
+/// Encoding: 512 character positions × 128 ASCII slots = 65 536 f32 values.
+/// Characters outside ASCII (codepoint > 127) are mapped to slot 0 (NUL).
+/// The output is laid out in row-major order: `tensor[char_idx * 128 + ascii]`.
+pub fn preprocess_crash_text(text: &str) -> Vec<f32> {
+    const CHARS: usize = 512;
+    const ASCII: usize = 128;
+    let mut tensor = vec![0.0f32; CHARS * ASCII];
+    for (i, ch) in text.chars().take(CHARS).enumerate() {
+        let code = ch as usize;
+        let slot = if code < ASCII { code } else { 0 };
+        tensor[i * ASCII + slot] = 1.0;
+    }
+    tensor
+}
+
 #[cfg(feature = "onnx")]
 fn run_crash_classifier(
     log_text: &str,
     config: &ModelConfig,
-    _session: &OrtSessionRef<'_>,
+    session: &OrtSessionRef<'_>,
     start: std::time::Instant,
 ) -> Result<InferenceResult, InferenceError> {
-    // TODO Phase D: implement CharCNN preprocessing and ORT inference
-    // Steps:
-    //   1. Truncate log_text to first 512 chars
-    //   2. One-hot encode each char → [512, 128] f32 tensor
-    //   3. session.run(ort::inputs!["input" => tensor]?)
-    //   4. Softmax outputs → class_probabilities
-    //   5. Return InferenceResult with top class + confidence
-    todo!("Phase D: implement CharCNN crash classifier ORT inference")
+    use ort::value::Tensor;
+
+    // Step 1: character-level one-hot encoding → [1, 512, 128] f32 tensor
+    let flat = preprocess_crash_text(log_text);
+    let tensor = Tensor::from_array(([1usize, 512, 128], flat.into_boxed_slice()))
+        .map_err(|e| InferenceError::PreprocessError(format!("tensor build: {e}")))?;
+
+    // Step 2: run ORT session
+    let outputs = session
+        .session
+        .run(ort::inputs!["input" => tensor]
+            .map_err(|e| InferenceError::OrtError(format!("inputs macro: {e}")))?)
+        .map_err(|e| InferenceError::OrtError(format!("session run: {e}")))?;
+
+    // Step 3: extract logits and apply softmax
+    let logits = outputs["output"]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| InferenceError::OrtError(format!("extract logits: {e}")))?;
+    let logits_slice = logits.as_slice().unwrap_or(&[]);
+
+    let probs = softmax(logits_slice);
+
+    // Step 4: pair with class labels and sort descending
+    let mut class_probabilities: Vec<(String, f32)> = config
+        .output_classes
+        .iter()
+        .cloned()
+        .zip(probs.iter().copied())
+        .collect();
+    class_probabilities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (predicted_class, confidence) = class_probabilities
+        .first()
+        .map(|(c, p)| (c.clone(), *p))
+        .unwrap_or_else(|| ("unknown".into(), 0.0));
+
+    Ok(InferenceResult {
+        model_name:         config.name.clone(),
+        model_version:      config.version.clone(),
+        predicted_class,
+        confidence,
+        class_probabilities,
+        elapsed_ms:         start.elapsed().as_millis() as u64,
+    })
+}
+
+// ── Shared utilities ──────────────────────────────────────────────────────────
+
+/// Numerically-stable softmax.
+fn softmax(logits: &[f32]) -> Vec<f32> {
+    if logits.is_empty() {
+        return Vec::new();
+    }
+    let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = logits.iter().map(|&x| (x - max).exp()).collect();
+    let sum: f32 = exps.iter().sum();
+    if sum == 0.0 {
+        return vec![1.0 / logits.len() as f32; logits.len()];
+    }
+    exps.iter().map(|&e| e / sum).collect()
 }
 
 // ── Phase E: Isolation Forest process anomaly implementation ──────────────────
@@ -282,6 +351,44 @@ mod tests {
         // Use the actual computed value so the test is self-consistent
         let result = verify_checksum(&tmp.path().to_path_buf(), &actual);
         assert!(result.is_ok(), "correct checksum should pass: {result:?}");
+    }
+
+    #[test]
+    fn preprocess_crash_text_length() {
+        let text = "A".repeat(600); // longer than 512
+        let tensor = preprocess_crash_text(&text);
+        assert_eq!(tensor.len(), 512 * 128, "tensor must be exactly 512×128 floats");
+    }
+
+    #[test]
+    fn preprocess_crash_text_short_input_zero_padded() {
+        let tensor = preprocess_crash_text("AB");
+        // Char 'A' = 65  → tensor[0*128 + 65] = 1.0
+        assert_eq!(tensor[65], 1.0);
+        // Char 'B' = 66  → tensor[1*128 + 66] = 1.0
+        assert_eq!(tensor[128 + 66], 1.0);
+        // Position 2 onward should be all zeros
+        let sum_rest: f32 = tensor[256..].iter().sum();
+        assert_eq!(sum_rest, 0.0, "un-used positions must be zero");
+    }
+
+    #[test]
+    fn preprocess_crash_text_non_ascii_maps_to_slot_zero() {
+        let tensor = preprocess_crash_text("é"); // codepoint 233 > 127
+        assert_eq!(tensor[0], 1.0, "non-ASCII goes to slot 0 (NUL)");
+    }
+
+    #[test]
+    fn softmax_sums_to_one() {
+        let logits = vec![1.0f32, 2.0, 3.0];
+        let probs = softmax(&logits);
+        let sum: f32 = probs.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5, "softmax must sum to 1.0");
+    }
+
+    #[test]
+    fn softmax_empty_returns_empty() {
+        assert!(softmax(&[]).is_empty());
     }
 
     #[test]

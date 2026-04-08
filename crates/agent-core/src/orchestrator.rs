@@ -4,9 +4,9 @@
 use crate::config::AgentConfig;
 use audit::{AuditLogger, EventType};
 use collectors::{CollectorSet, Platform};
-use detector::diagnose;
+use detector::{diagnose, merge_ml};
 use feature_extractor::extract;
-use inference::AdaptiveThresholds;
+use inference::{AdaptiveThresholds, ModelSessionPool};
 use remediation::{execute as execute_plan, plan as build_plan, ConsentMethod};
 use signal_normalizer::normalize;
 use storage::Repository;
@@ -15,6 +15,7 @@ use trigger_engine::{IssueClass, TriggerEngine};
 use anyhow::Result;
 use chrono::Utc;
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
@@ -26,6 +27,8 @@ pub struct Orchestrator {
     collector_set: CollectorSet,
     trigger_engine: TriggerEngine,
     session_id: Uuid,
+    /// Lazy-loading ONNX session pool — zero cost when `onnx` feature is off.
+    ml_pool: ModelSessionPool,
 }
 
 impl Orchestrator {
@@ -34,6 +37,7 @@ impl Orchestrator {
             collector_set: CollectorSet::new(Platform::current()),
             trigger_engine: TriggerEngine::new(),
             session_id: Uuid::new_v4(),
+            ml_pool: ModelSessionPool::new(),
             config,
         }
     }
@@ -144,7 +148,24 @@ impl Orchestrator {
             "snapshot_id": normalized.snapshot_id,
         }))?;
 
-        let diagnosis = diagnose(&features, &trigger_event.issue_classes);
+        let rule_output = diagnose(&features, &trigger_event.issue_classes);
+
+        // ── Step 6b: ML augmentation (Phase D — crash classifier) ────────────
+        // Build per-class ML score map. Each model result is keyed by IssueClass.
+        // Returns Ok(None) when the onnx feature is off or model is not loaded.
+        let mut ml_scores = HashMap::new();
+        if let Some(log_text) = &features.crash_log_text {
+            // Crash classifier config is loaded from the manifest at startup in Phase B+.
+            // Until the manifest loader is wired here, pass None — classify_crash_log
+            // returns Ok(None) gracefully and rules-only mode applies.
+            match inference::classify_crash_log(log_text, None, None) {
+                Ok(Some(ir)) => { ml_scores.insert(IssueClass::AppCrash, ir); }
+                Ok(None)     => {}
+                Err(e)       => { warn!(error = %e, "Crash classifier failed — rules only"); }
+            }
+        }
+
+        let diagnosis = merge_ml(rule_output, &ml_scores, None);
 
         if diagnosis.is_empty() {
             debug!("Trigger fired but no diagnosis produced — inconclusive");

@@ -231,6 +231,8 @@ pub struct MacosSpecificRaw {
     pub spotlight_indexing: bool,
     /// Whether TimeMachine backup is in progress
     pub timemachine_active: bool,
+    /// Raw text of the most recent crash report (first 512 chars), for ML classification.
+    pub last_crash_log_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -81,6 +81,7 @@ pub fn extract(
         app_crash_count_24h: current.crashes.count_24h,
         crash_process_name: current.crashes.last_process_name.clone(),
         crash_exception_type: current.crashes.last_exception_type.clone(),
+        crash_log_text: current.crashes.last_crash_log_text.clone(),
 
         // Services
         service_restart_storm: current.services.iter().any(|s| s.restart_count_1h > 10),

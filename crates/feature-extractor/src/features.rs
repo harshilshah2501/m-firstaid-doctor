@@ -63,6 +63,9 @@ pub struct FeatureSet {
     pub app_crash_count_24h: u32,
     pub crash_process_name: Option<String>,
     pub crash_exception_type: Option<String>,
+    /// First 512 chars of the most-recent crash report (macOS only for now).
+    /// Passed to the CharCNN crash classifier when available.
+    pub crash_log_text: Option<String>,
 
     // ── Services ─────────────────────────────────────────────────────────────
     pub service_restart_storm: bool,

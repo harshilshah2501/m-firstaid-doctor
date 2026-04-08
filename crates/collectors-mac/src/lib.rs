@@ -4,15 +4,17 @@
 //! only available through macOS-native APIs.
 
 #[cfg(target_os = "macos")]
-pub mod thermal;
+pub mod battery;
+#[cfg(target_os = "macos")]
+pub mod crash_logs;
 #[cfg(target_os = "macos")]
 pub mod memory_pressure;
 #[cfg(target_os = "macos")]
-pub mod battery;
+pub mod network_extra;
 #[cfg(target_os = "macos")]
 pub mod startup;
 #[cfg(target_os = "macos")]
-pub mod network_extra;
+pub mod thermal;
 
 /// Enrich a RawSnapshot with macOS-specific signals.
 /// Called by CollectorSet on macOS after the cross-platform collection completes.
@@ -43,12 +45,15 @@ pub async fn enrich(snapshot: &mut collectors::RawSnapshot) {
     // Launch agents/daemons count
     match startup::count_launch_agents().await {
         Ok((agents, daemons, login_items)) => {
+            let last_crash_log_text = crash_logs::collect_latest().await
+                .unwrap_or(None);
             snapshot.platform_specific.macos = Some(collectors::MacosSpecificRaw {
                 launch_agents_count: agents,
                 launch_daemons_count: daemons,
                 login_items_count: login_items,
                 spotlight_indexing: false,  // TODO
                 timemachine_active: false,  // TODO
+                last_crash_log_text,
             });
         }
         Err(e) => warn!(error = %e, "macOS launch agent count failed"),

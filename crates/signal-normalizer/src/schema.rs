@@ -174,6 +174,8 @@ pub struct NormalizedCrashes {
     pub count_7d: u32,
     pub last_process_name: Option<String>,
     pub last_exception_type: Option<String>,
+    /// First 512 chars of the most-recent crash report, for ML classification.
+    pub last_crash_log_text: Option<String>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
