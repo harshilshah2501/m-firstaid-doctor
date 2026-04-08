@@ -1,0 +1,19 @@
+#!/bin/bash
+# PKG pre-install script — runs as root before files are copied.
+# Stops any running FirstAid daemon so the binary can be replaced.
+set -euo pipefail
+
+DAEMON_LABEL="com.firstaid.doctor.daemon"
+PLIST="/Library/LaunchDaemons/${DAEMON_LABEL}.plist"
+
+if [ -f "$PLIST" ]; then
+    echo "Stopping existing FirstAid Doctor daemon…"
+    launchctl unload "$PLIST" 2>/dev/null || true
+fi
+
+# Remove old binary so lipo-universal replacement is clean
+if [ -f /usr/local/bin/firstaid ]; then
+    rm -f /usr/local/bin/firstaid
+fi
+
+exit 0

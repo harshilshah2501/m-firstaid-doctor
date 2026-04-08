@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Hardened-runtime entitlements for notarization.
+    Used by:
+      codesign --entitlements packaging/macos/entitlements.plist ...
+-->
+<plist version="1.0">
+<dict>
+    <!-- Allow execution of JIT-compiled code (not needed but harmless) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+
+    <!-- Allow loading unsigned libraries (ORT shared lib loaded at runtime) -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Allow DYLD environment variables (needed for ORT load-dynamic) -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- Outgoing network connections (for future cloud-optional features) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Read/write access to user-selected files (diagnostic exports) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

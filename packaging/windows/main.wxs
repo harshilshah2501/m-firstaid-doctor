@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    WiX Toolset v3 installer source for FirstAid Doctor.
+    Produces a per-machine MSI that:
+      - Installs firstaid.exe to %ProgramFiles%\FirstAid Doctor\
+      - Installs OnnxRuntime DLL alongside the binary (if present)
+      - Registers firstaid as a Windows Service (runs as LocalSystem)
+      - Adds the install directory to the system PATH
+      - Creates a Start Menu shortcut to open a cmd prompt with `firstaid`
+      - Handles clean upgrades via the same UpgradeCode GUID
+
+    Build:
+      cargo install cargo-wix
+      cd crates\agent-core
+      cargo wix --nocapture --output ..\..\dist\windows\firstaid-<version>-x86_64.msi
+
+    Or use scripts\package-windows.ps1 which automates the above.
+
+    Signing:
+      signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256
+                    /f cert.pfx /p <password>
+                    dist\windows\firstaid-<version>-x86_64.msi
+-->
+<?define Version="0.1.0" ?>
+<?define Manufacturer="FirstAid Doctor Contributors" ?>
+<?define ProductName="FirstAid Doctor" ?>
+<?define Description="Local-first endpoint health diagnostics and remediation" ?>
+<?define InstallDir="FirstAid Doctor" ?>
+<?define ServiceName="firstaid" ?>
+<?define ServiceDisplayName="FirstAid Doctor Agent" ?>
+<?define BinaryName="firstaid.exe" ?>
+<?define UpgradeCode="E3A7C1D2-8F4B-4E9A-B2C5-6D0F3A1E7B94" ?>
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <Product Id="*"
+           Name="$(var.ProductName)"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="$(var.Manufacturer)"
+           UpgradeCode="$(var.UpgradeCode)">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="$(var.Description)"
+             Manufacturer="$(var.Manufacturer)"
+             Comments="https://github.com/harshilshah2501/m-firstaid-doctor" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of $(var.ProductName) is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- ── Directories ─────────────────────────────────────────────────── -->
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="$(var.InstallDir)">
+          <!-- Binary and optional ORT DLL land here -->
+        </Directory>
+      </Directory>
+
+      <!-- System PATH entry -->
+      <Directory Id="SystemFolder" />
+
+      <!-- Start Menu shortcut -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="$(var.ProductName)" />
+      </Directory>
+
+      <!-- ProgramData for DB and logs (survives uninstall unless user removes) -->
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATAROOTDIR" Name="$(var.InstallDir)">
+          <Directory Id="LOGDIR" Name="logs" />
+        </Directory>
+      </Directory>
+
+    </Directory>
+
+    <!-- ── Components ──────────────────────────────────────────────────── -->
+
+    <DirectoryRef Id="INSTALLFOLDER">
+
+      <!-- Main binary -->
+      <Component Id="MainBinary" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+        <File Id="FirstaidExe"
+              Name="$(var.BinaryName)"
+              Source="..\..\target\x86_64-pc-windows-msvc\release\$(var.BinaryName)"
+              KeyPath="yes" />
+
+        <!-- Windows Service registration -->
+        <ServiceInstall
+            Id="FirstaidService"
+            Name="$(var.ServiceName)"
+            DisplayName="$(var.ServiceDisplayName)"
+            Description="$(var.Description)"
+            Type="ownProcess"
+            Start="auto"
+            Account="LocalSystem"
+            ErrorControl="normal"
+            Arguments="daemon"
+            Interactive="no" />
+
+        <!-- Start service on install, stop+delete on uninstall -->
+        <ServiceControl
+            Id="StartFirstaidService"
+            Name="$(var.ServiceName)"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+
+        <!-- Add install directory to system PATH -->
+        <Environment
+            Id="PATH"
+            Name="PATH"
+            Value="[INSTALLFOLDER]"
+            Permanent="no"
+            Part="last"
+            Action="set"
+            System="yes" />
+      </Component>
+
+      <!-- ORT shared library (optional — only bundled when present) -->
+      <Component Id="OrtDll" Guid="B2C3D4E5-F6A7-8901-BCDE-F23456789012">
+        <Condition>ORT_DLL_PRESENT</Condition>
+        <File Id="OnnxRuntimeDll"
+              Name="onnxruntime.dll"
+              Source="..\..\ort\onnxruntime.dll"
+              KeyPath="yes" />
+      </Component>
+
+    </DirectoryRef>
+
+    <!-- Data directory (ProgramData\FirstAid Doctor) — kept on uninstall -->
+    <DirectoryRef Id="DATAROOTDIR">
+      <Component Id="DataDir" Guid="C3D4E5F6-A7B8-9012-CDEF-345678901234">
+        <CreateFolder />
+        <!-- Grant LocalSystem full control, Users read-only -->
+        <util:PermissionEx GenericAll="yes" User="SYSTEM" />
+        <util:PermissionEx GenericRead="yes" GenericExecute="yes" User="Users" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="LOGDIR">
+      <Component Id="LogDir" Guid="D4E5F6A7-B8C9-0123-DEF0-456789012345">
+        <CreateFolder />
+        <util:PermissionEx GenericAll="yes" User="SYSTEM" />
+        <util:PermissionEx GenericRead="yes" GenericExecute="yes" User="Users" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start Menu shortcut: opens cmd.exe in the install dir -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="E5F6A7B8-C9D0-1234-EF01-567890123456">
+        <Shortcut Id="FirstaidShortcut"
+                  Name="FirstAid Doctor"
+                  Description="Open FirstAid Doctor command prompt"
+                  Target="[SystemFolder]cmd.exe"
+                  Arguments='/k "firstaid --help"'
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanupStartMenu" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\FirstAidDoctor"
+                       Name="installed"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ── Features ────────────────────────────────────────────────────── -->
+
+    <Feature Id="ProductFeature"
+             Title="$(var.ProductName)"
+             Level="1"
+             Description="Core agent binary and Windows service">
+      <ComponentRef Id="MainBinary" />
+      <ComponentRef Id="DataDir" />
+      <ComponentRef Id="LogDir" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <Feature Id="OrtFeature"
+             Title="ONNX Runtime"
+             Level="1"
+             Description="ML inference engine (required for AI-powered diagnostics)">
+      <ComponentRef Id="OrtDll" />
+    </Feature>
+
+    <!-- ── UI ──────────────────────────────────────────────────────────── -->
+
+    <UIRef Id="WixUI_Minimal" />
+
+    <!-- Skip the license dialog for a cleaner install experience -->
+    <!-- Uncomment and provide a RTF file to show a license screen:   -->
+    <!-- <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />     -->
+
+    <!-- ── Conditions ──────────────────────────────────────────────────── -->
+
+    <!-- Require Windows 10 (build 17763) or later -->
+    <Condition Message="$(var.ProductName) requires Windows 10 (version 1809) or later.">
+      <![CDATA[Installed OR (VersionNT >= 603)]]>
+    </Condition>
+
+    <!-- Detect ORT DLL presence for conditional component -->
+    <Property Id="ORT_DLL_PRESENT" Value="0" />
+    <SetProperty Id="ORT_DLL_PRESENT" Value="1"
+                 After="AppSearch">
+      <![CDATA[ORT_DLL_PATH]]>
+    </SetProperty>
+    <AppSearch>
+      <Property Id="ORT_DLL_PATH">
+        <FileSearch Name="onnxruntime.dll" />
+      </Property>
+    </AppSearch>
+
+    <!-- ── Registry: version stamp (for installers and scripts) ─────────── -->
+
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="RegistryEntries"
+                 Guid="F6A7B8C9-D0E1-2345-F012-678901234567">
+        <RegistryKey Root="HKLM"
+                     Key="SOFTWARE\FirstAidDoctor"
+                     Action="createAndRemoveOnUninstall">
+          <RegistryValue Name="Version"     Type="string"  Value="$(var.Version)" />
+          <RegistryValue Name="InstallPath" Type="string"  Value="[INSTALLFOLDER]" />
+          <RegistryValue Name="DataPath"    Type="string"  Value="[DATAROOTDIR]" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+
+  </Product>
+</Wix>

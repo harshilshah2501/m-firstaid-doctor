@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    LaunchDaemon for the FirstAid Doctor background agent.
+    Installed to: /Library/LaunchDaemons/com.firstaid.doctor.daemon.plist
+    Runs as root so it can read system metrics and execute AutoSafe remediations.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.firstaid.doctor.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/firstaid</string>
+        <string>daemon</string>
+    </array>
+
+    <!-- Start immediately when the plist is loaded (boot / launchctl load) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart if the daemon exits for any reason -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Prevent rapid restart loops: wait at least 10 s before respawn -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Structured log output -->
+    <key>StandardOutPath</key>
+    <string>/var/log/firstaid/firstaid.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/firstaid/firstaid.err</string>
+
+    <!-- Working directory for relative config paths -->
+    <key>WorkingDirectory</key>
+    <string>/var/lib/firstaid</string>
+
+    <!-- Environment: honour RUST_LOG for log verbosity tuning -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>firstaid=info,agent_core=info</string>
+        <key>FIRSTAID_DB</key>
+        <string>/var/lib/firstaid/agent.db</string>
+    </dict>
+
+    <!-- Process priority — not a foreground interactive app -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Disable sandbox so the daemon can read /proc, /dev, IOKit, etc. -->
+    <key>SandboxProfile</key>
+    <string></string>
+</dict>
+</plist>
