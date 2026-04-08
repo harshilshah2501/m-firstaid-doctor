@@ -1,6 +1,8 @@
-pub mod types;
+pub mod ml_merger;
 pub mod rules;
+pub mod types;
 
+pub use ml_merger::merge_ml;
 pub use types::*;
 
 use feature_extractor::FeatureSet;
