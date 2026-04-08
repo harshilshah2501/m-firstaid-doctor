@@ -17,12 +17,5 @@ pub async fn count_run_keys() -> Result<u32, CollectorError> {
         .map_err(|e| CollectorError::OsApi(e.to_string()))?;
 
     let count_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    count_str.parse::<u32>().unwrap_or(0).into_ok()
-}
-
-trait IntoOk<T> {
-    fn into_ok(self) -> Result<T, CollectorError>;
-}
-impl IntoOk<u32> for u32 {
-    fn into_ok(self) -> Result<u32, CollectorError> { Ok(self) }
+    Ok(count_str.parse::<u32>().unwrap_or(0))
 }
