@@ -9,6 +9,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing   = { workspace = true }
 anyhow    = { workspace = true }
+rusqlite  = { workspace = true }
 
 # ONNX Runtime — load-dynamic so ORT shared lib is not statically linked.
 # Feature-gated so Phase 1 builds succeed without ORT installed.

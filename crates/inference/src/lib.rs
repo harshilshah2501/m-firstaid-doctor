@@ -1,6 +1,15 @@
-//! Lazy-load ONNX model inference.
-//! Phase 1: stub — models are not loaded; all inference returns None.
-//! Phase 3: activate with the `onnx` feature flag.
+//! ML inference layer — adaptive thresholds + ONNX model stubs.
+//!
+//! # Phase A (active): Adaptive Threshold Learner
+//! `adaptive::AdaptiveThresholds` — Bayesian per-metric baseline learning
+//! via Welford online algorithm. Persisted to SQLite; zero external deps.
+//!
+//! # Phase B+ (feature-gated): ONNX Runtime
+//! Activate with `--features onnx`. Models: crash classifier (CharCNN),
+//! process anomaly (Isolation Forest), temporal anomaly (MiniPatch-TST).
+
+pub mod adaptive;
+pub use adaptive::AdaptiveThresholds;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

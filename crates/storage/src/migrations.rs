@@ -5,6 +5,7 @@ use tracing::debug;
 /// Each migration is idempotent (CREATE TABLE IF NOT EXISTS).
 pub fn apply_all(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(MIGRATION_001)?;
+    conn.execute_batch(MIGRATION_002)?;
     debug!("Migrations applied");
     Ok(())
 }
@@ -87,4 +88,32 @@ CREATE TABLE IF NOT EXISTS known_issues (
 
 INSERT OR IGNORE INTO schema_version(version, applied_at)
 VALUES (1, datetime('now'));
+"#;
+
+/// Migration 002 — ML model parameters storage
+const MIGRATION_002: &str = r#"
+-- Persisted ML model parameters (adaptive thresholds, ONNX fine-tune weights, etc.)
+-- Each row is one named blob of JSON-serialized parameters.
+-- Updated in-place on every collection cycle for adaptive models.
+CREATE TABLE IF NOT EXISTS model_params (
+    param_key   TEXT PRIMARY KEY,           -- e.g. 'adaptive_thresholds'
+    param_json  TEXT NOT NULL,              -- serialized model state
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Feature vectors extracted from each snapshot, used as the training corpus
+-- for on-device model fine-tuning. Retained for 30 days.
+CREATE TABLE IF NOT EXISTS feature_vectors (
+    snapshot_id TEXT PRIMARY KEY,
+    collected_at TEXT NOT NULL,
+    features_json TEXT NOT NULL,            -- FeatureSet as JSON
+    label TEXT,                             -- IssueClass name if a diagnosis was made, else NULL
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (snapshot_id) REFERENCES signal_snapshots(snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_features_collected ON feature_vectors(collected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_features_label ON feature_vectors(label);
+
+INSERT OR IGNORE INTO schema_version(version, applied_at)
+VALUES (2, datetime('now'));
 "#;

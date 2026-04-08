@@ -140,8 +140,9 @@ async fn cmd_diagnose(
 
         // Fixture mode: feed the same sample enough times to satisfy hysteresis
         // (samples_required=3) so the trigger engine can fire on a single snapshot.
+        // No adaptive thresholds in fixture mode — use rule defaults only.
         let mut engine = trigger_engine::TriggerEngine::new();
-        let trigger = (0..3).fold(None, |_, _| engine.evaluate(&features));
+        let trigger = (0..3).fold(None, |_, _| engine.evaluate(&features, None));
 
         let diagnosis = if let Some(trigger_event) = trigger {
             detector::diagnose(&features, &trigger_event.issue_classes)

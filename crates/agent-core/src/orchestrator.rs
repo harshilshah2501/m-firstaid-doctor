@@ -6,6 +6,7 @@ use audit::{AuditLogger, EventType};
 use collectors::{CollectorSet, Platform};
 use detector::diagnose;
 use feature_extractor::extract;
+use inference::AdaptiveThresholds;
 use remediation::{execute as execute_plan, plan as build_plan, ConsentMethod};
 use signal_normalizer::normalize;
 use storage::Repository;
@@ -102,8 +103,27 @@ impl Orchestrator {
         let history = repo.recent_snapshots(feature_extractor::HISTORY_WINDOW)?;
         let features = extract(&normalized, &history[1..]); // exclude current from history
 
-        // ── Step 5: Trigger evaluation ───────────────────────────────────────
-        let trigger = self.trigger_engine.evaluate(&features);
+        // ── Step 5: Adaptive threshold update + trigger evaluation ───────────
+        // Load persisted thresholds, update with current observation, persist.
+        // The trigger engine uses the updated thresholds for this cycle.
+        // On error (e.g. table missing), fall back to rule defaults silently.
+        let adaptive = AdaptiveThresholds::load(conn).ok().map(|mut at| {
+            at.update_all(&[
+                ("cpu_usage_avg_5m",  features.cpu_usage_avg_5m as f64),
+                ("cpu_usage_avg_15m", features.cpu_usage_avg_15m as f64),
+                ("memory_used_pct",   features.memory_used_pct as f64),
+                ("swap_used_pct",     features.swap_used_pct as f64),
+            ]);
+            let _ = at.save(conn);  // non-fatal if DB write fails
+            at
+        });
+
+        debug!(
+            calibration_pct = adaptive.as_ref().map(|a| (a.calibration_fraction() * 100.0) as u32),
+            "AdaptiveThresholds calibration status"
+        );
+
+        let trigger = self.trigger_engine.evaluate(&features, adaptive.as_ref());
         let Some(trigger_event) = trigger else {
             return Ok(DiagnosticCycleResult {
                 snapshot_id: normalized.snapshot_id,

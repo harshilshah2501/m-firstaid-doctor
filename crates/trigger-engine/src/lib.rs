@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use feature_extractor::FeatureSet;
+use inference::AdaptiveThresholds;
 use serde::{Deserialize, Serialize};
 use signal_normalizer::MemoryPressure;
 use std::collections::HashMap;
@@ -35,8 +36,34 @@ pub struct TriggerReason {
     pub issue_class: IssueClass,
     pub field: String,
     pub value: String,
+    /// Either "adaptive: mean+2.5σ = X%" or the hard-coded default string.
     pub threshold: String,
+    /// True if this threshold was personalized by AdaptiveThresholds.
+    pub adaptive: bool,
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Hard-coded rule defaults (used until AdaptiveThresholds is calibrated)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Hard-coded trigger threshold for CPU (5-min avg). Used as fallback.
+const DEFAULT_CPU_HIGH: f32 = 85.0;
+/// Hard-coded recovery threshold for CPU.
+const DEFAULT_CPU_RECOVERY: f32 = 70.0;
+/// Sigma multiplier for adaptive CPU threshold (mean + 2.5σ).
+/// 2.5σ flags the top ~0.6% of observed values for this machine.
+const CPU_SIGMA: f64 = 2.5;
+
+/// Hard-coded trigger threshold for memory utilization %.
+const DEFAULT_MEM_HIGH: f32 = 90.0;
+/// Hard-coded recovery threshold for memory.
+const DEFAULT_MEM_RECOVERY: f32 = 75.0;
+const MEM_SIGMA: f64 = 2.5;
+
+/// Hard-coded low-disk trigger (% free space below this = alert).
+const DEFAULT_DISK_LOW: f32 = 10.0;
+/// Hard-coded disk recovery threshold.
+const DEFAULT_DISK_RECOVERY: f32 = 15.0;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Trigger state (hysteresis tracking)
@@ -56,6 +83,10 @@ struct TriggerState {
 }
 
 /// Stateful trigger engine. Maintained across poll cycles.
+///
+/// Accepts an optional `&AdaptiveThresholds` in `evaluate()`. When provided
+/// and calibrated (≥50 samples), personalized thresholds replace the
+/// hard-coded defaults. The hard-coded values remain the safety fallback.
 pub struct TriggerEngine {
     state: HashMap<IssueClass, TriggerState>,
     /// Minimum samples above threshold before firing (anti-flap)
@@ -76,17 +107,39 @@ impl TriggerEngine {
         }
     }
 
-    /// Evaluate a new feature set. Returns Some(TriggerEvent) if one or more
-    /// issue classes should be diagnosed, None otherwise.
-    pub fn evaluate(&mut self, features: &FeatureSet) -> Option<TriggerEvent> {
+    /// Evaluate a new feature set.
+    ///
+    /// Pass `adaptive` to use machine-specific learned thresholds.
+    /// Pass `None` (or use `evaluate_default`) to use hard-coded defaults.
+    ///
+    /// Returns `Some(TriggerEvent)` if one or more issue classes fired.
+    pub fn evaluate(
+        &mut self,
+        features: &FeatureSet,
+        adaptive: Option<&AdaptiveThresholds>,
+    ) -> Option<TriggerEvent> {
         let now = Utc::now();
         let mut fired_classes = Vec::new();
         let mut reasons = Vec::new();
 
+        // ── CPU ───────────────────────────────────────────────────────────────
+        // Also feed the observation into the adaptive learner each cycle
+        // (caller is responsible for calling at.update() before evaluate()).
+        let (cpu_high, cpu_recovery, cpu_adaptive) = match adaptive
+            .and_then(|at| at.threshold("cpu_usage_avg_5m", CPU_SIGMA))
+        {
+            Some(learned) => {
+                // Recovery = learned threshold × 0.85 (give 15% headroom to re-arm)
+                let recovery = (learned * 0.85) as f32;
+                (learned as f32, recovery, true)
+            }
+            None => (DEFAULT_CPU_HIGH, DEFAULT_CPU_RECOVERY, false),
+        };
+
         self.evaluate_class(
             IssueClass::HighCpu,
-            features.cpu_usage_avg_5m > 85.0,
-            features.cpu_usage_avg_5m < 70.0,
+            features.cpu_usage_avg_5m > cpu_high,
+            features.cpu_usage_avg_5m < cpu_recovery,
             &now,
             &mut fired_classes,
             &mut reasons,
@@ -94,18 +147,31 @@ impl TriggerEngine {
                 issue_class: IssueClass::HighCpu,
                 field: "cpu_usage_avg_5m".into(),
                 value: format!("{:.1}%", features.cpu_usage_avg_5m),
-                threshold: ">85%".into(),
+                threshold: if cpu_adaptive {
+                    format!(">adaptive {:.1}% (mean+{CPU_SIGMA}σ)", cpu_high)
+                } else {
+                    format!(">{DEFAULT_CPU_HIGH}% (rule default)")
+                },
+                adaptive: cpu_adaptive,
             },
         );
 
+        // ── Memory ────────────────────────────────────────────────────────────
+        let (mem_high, mem_recovery, mem_adaptive) = match adaptive
+            .and_then(|at| at.threshold("memory_used_pct", MEM_SIGMA))
+        {
+            Some(learned) => ((learned as f32).min(97.0), (learned * 0.88) as f32, true),
+            None => (DEFAULT_MEM_HIGH, DEFAULT_MEM_RECOVERY, false),
+        };
+
         self.evaluate_class(
             IssueClass::HighMemory,
-            features.memory_used_pct > 90.0
+            features.memory_used_pct > mem_high
                 || features.memory_oom_risk
                 || features.memory_pressure.as_ref()
                     .map(|p| p >= &MemoryPressure::Critical)
                     .unwrap_or(false),
-            features.memory_used_pct < 75.0,
+            features.memory_used_pct < mem_recovery,
             &now,
             &mut fired_classes,
             &mut reasons,
@@ -113,14 +179,20 @@ impl TriggerEngine {
                 issue_class: IssueClass::HighMemory,
                 field: "memory_used_pct".into(),
                 value: format!("{:.1}%", features.memory_used_pct),
-                threshold: ">90% or Critical pressure".into(),
+                threshold: if mem_adaptive {
+                    format!(">adaptive {:.1}% (mean+{MEM_SIGMA}σ)", mem_high)
+                } else {
+                    format!(">{DEFAULT_MEM_HIGH}% or Critical pressure (rule default)")
+                },
+                adaptive: mem_adaptive,
             },
         );
 
+        // ── Disk — no adaptive threshold (physical constraint, not baseline) ──
         self.evaluate_class(
             IssueClass::LowDisk,
-            features.system_disk_free_pct < 10.0,
-            features.system_disk_free_pct > 15.0,
+            features.system_disk_free_pct < DEFAULT_DISK_LOW,
+            features.system_disk_free_pct > DEFAULT_DISK_RECOVERY,
             &now,
             &mut fired_classes,
             &mut reasons,
@@ -128,10 +200,12 @@ impl TriggerEngine {
                 issue_class: IssueClass::LowDisk,
                 field: "system_disk_free_pct".into(),
                 value: format!("{:.1}%", features.system_disk_free_pct),
-                threshold: "<10%".into(),
+                threshold: format!("<{DEFAULT_DISK_LOW}% free (rule default)"),
+                adaptive: false,
             },
         );
 
+        // ── App Crash — count-based, no adaptive threshold ────────────────────
         self.evaluate_class(
             IssueClass::AppCrash,
             features.app_crash_count_24h >= 2,
@@ -143,10 +217,12 @@ impl TriggerEngine {
                 issue_class: IssueClass::AppCrash,
                 field: "app_crash_count_24h".into(),
                 value: features.app_crash_count_24h.to_string(),
-                threshold: ">=2".into(),
+                threshold: ">=2 crashes in 24h (rule default)".into(),
+                adaptive: false,
             },
         );
 
+        // ── Network / DNS ─────────────────────────────────────────────────────
         self.evaluate_class(
             IssueClass::NetworkDns,
             !features.network_reachable || features.dns_resolution_fail_rate > 0.2,
@@ -158,10 +234,12 @@ impl TriggerEngine {
                 issue_class: IssueClass::NetworkDns,
                 field: "network_reachable".into(),
                 value: features.network_reachable.to_string(),
-                threshold: "reachable=false or dns_fail_rate>20%".into(),
+                threshold: "reachable=false or dns_fail_rate>20% (rule default)".into(),
+                adaptive: false,
             },
         );
 
+        // ── Battery / Thermal ─────────────────────────────────────────────────
         self.evaluate_class(
             IssueClass::BatteryThermal,
             features.cpu_temp_celsius.map(|t| t > 90.0).unwrap_or(false)
@@ -177,10 +255,12 @@ impl TriggerEngine {
                 issue_class: IssueClass::BatteryThermal,
                 field: "cpu_temp_celsius".into(),
                 value: format!("{:?}", features.cpu_temp_celsius),
-                threshold: ">90°C or battery_health<80%".into(),
+                threshold: ">90°C or battery_health<80% (rule default)".into(),
+                adaptive: false,
             },
         );
 
+        // ── Service Down ──────────────────────────────────────────────────────
         self.evaluate_class(
             IssueClass::ServiceDown,
             features.service_down_expected || features.service_restart_storm,
@@ -192,10 +272,12 @@ impl TriggerEngine {
                 issue_class: IssueClass::ServiceDown,
                 field: "service_down_expected".into(),
                 value: features.service_down_expected.to_string(),
-                threshold: "true".into(),
+                threshold: "true (rule default)".into(),
+                adaptive: false,
             },
         );
 
+        // ── Update Issue ──────────────────────────────────────────────────────
         self.evaluate_class(
             IssueClass::UpdateIssue,
             features.update_failed || features.pending_reboot_required,
@@ -207,7 +289,8 @@ impl TriggerEngine {
                 issue_class: IssueClass::UpdateIssue,
                 field: "update_failed".into(),
                 value: features.update_failed.to_string(),
-                threshold: "true".into(),
+                threshold: "true (rule default)".into(),
+                adaptive: false,
             },
         );
 
@@ -245,9 +328,8 @@ impl TriggerEngine {
                 state.active = false;
                 state.samples_above = 0;
             }
-        } else {
-            // Between threshold and recovery — don't reset samples_above
         }
+        // Between threshold and recovery — don't reset samples_above
 
         let in_cooldown = state.last_triggered.map(|t| {
             now.signed_duration_since(t).num_seconds() < self.cooldown_seconds as i64
@@ -263,7 +345,5 @@ impl TriggerEngine {
 }
 
 impl Default for TriggerEngine {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
