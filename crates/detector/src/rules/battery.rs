@@ -5,7 +5,7 @@ use trigger_engine::IssueClass;
 
 pub fn diagnose(f: &FeatureSet) -> Option<Diagnosis> {
     // Rule 1: Critical thermal state
-    if f.thermal_state.as_ref() >= Some(&ThermalState::Critical).as_ref()
+    if f.thermal_state.as_ref().map(|s| *s >= ThermalState::Critical).unwrap_or(false)
         || f.cpu_temp_celsius.map(|t| t > 100.0).unwrap_or(false)
     {
         return Some(Diagnosis {

@@ -218,19 +218,19 @@ async fn kill_process(
 ) -> anyhow::Result<serde_json::Value> {
     #[cfg(unix)]
     {
-        use std::os::unix::process::ExitStatusExt;
-        let sig = match signal {
-            Signal::Sigterm => nix::sys::signal::Signal::SIGTERM,
-            Signal::Sigkill => nix::sys::signal::Signal::SIGKILL,
-            Signal::Sigstop => nix::sys::signal::Signal::SIGSTOP,
+        let sig_num = match signal {
+            Signal::Sigterm => "15",
+            Signal::Sigkill => "9",
+            Signal::Sigstop => "19",
         };
-        // Safety: kill() only sends a signal; it does not grant any new capabilities.
-        // The process must be owned by the current user or we will get EPERM.
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid as i32),
-            sig,
-        ).map_err(|e| anyhow::anyhow!("kill({pid}, {sig}): {e}"))?;
-        return Ok(serde_json::json!({"pid": pid, "signal": format!("{:?}", signal), "sent": true}));
+        let status = tokio::process::Command::new("kill")
+            .args([&format!("-{}", sig_num), &pid.to_string()])
+            .status()
+            .await?;
+        if status.success() {
+            return Ok(serde_json::json!({"pid": pid, "signal": format!("{:?}", signal), "sent": true}));
+        }
+        return Err(anyhow::anyhow!("kill -{} {} failed: exit code {:?}", sig_num, pid, status.code()));
     }
 
     #[cfg(target_os = "windows")]
@@ -313,13 +313,14 @@ async fn run_probe(probe_type: &ProbeType) -> anyhow::Result<serde_json::Value> 
 async fn renice(pid: u32, nice_value: i8) -> anyhow::Result<serde_json::Value> {
     #[cfg(unix)]
     {
-        let result = unsafe {
-            libc::setpriority(libc::PRIO_PROCESS, pid, nice_value as i32)
-        };
-        if result == 0 {
+        let status = tokio::process::Command::new("renice")
+            .args(["-n", &nice_value.to_string(), "-p", &pid.to_string()])
+            .status()
+            .await?;
+        if status.success() {
             return Ok(serde_json::json!({"pid": pid, "nice": nice_value}));
         }
-        return Err(anyhow::anyhow!("setpriority failed: errno {}", std::io::Error::last_os_error()));
+        return Err(anyhow::anyhow!("renice -n {} -p {} failed", nice_value, pid));
     }
     #[allow(unreachable_code)]
     Err(anyhow::anyhow!("renice not supported on this platform"))

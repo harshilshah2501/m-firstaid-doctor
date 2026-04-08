@@ -1,5 +1,5 @@
 use crate::{CollectorError, ProcessRaw, RawProcessStatus};
-use sysinfo::{ProcessStatus, System};
+use sysinfo::{ProcessStatus, System, ProcessRefreshKind, UpdateKind};
 use chrono::{DateTime, Utc};
 
 /// Maximum number of processes to return (sorted by CPU% desc).
@@ -8,8 +8,12 @@ const MAX_PROCESSES: usize = 256;
 
 pub async fn collect() -> Result<Vec<ProcessRaw>, CollectorError> {
     tokio::task::spawn_blocking(|| {
+        let refresh_kind = ProcessRefreshKind::new()
+            .with_cpu()
+            .with_memory()
+            .with_exe(UpdateKind::OnlyIfNotSet);
         let mut sys = System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        sys.refresh_processes_specifics(refresh_kind);
 
         let mut procs: Vec<ProcessRaw> = sys
             .processes()
@@ -24,7 +28,7 @@ pub async fn collect() -> Result<Vec<ProcessRaw>, CollectorError> {
 
                 ProcessRaw {
                     pid: p.pid().as_u32(),
-                    name: p.name().to_string_lossy().into_owned(),
+                    name: p.name().to_string(),
                     cpu_pct: p.cpu_usage(),
                     rss_bytes: p.memory(),
                     vms_bytes: p.virtual_memory(),

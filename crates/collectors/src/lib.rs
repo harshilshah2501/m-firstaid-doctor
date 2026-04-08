@@ -13,17 +13,6 @@ pub use error::CollectorError;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
-/// Trait that all platform-specific and cross-platform collectors implement.
-#[async_trait::async_trait]
-pub trait Collector: Send + Sync {
-    type Output;
-
-    /// Collect signals. Must not block for more than `timeout_ms` milliseconds.
-    async fn collect(&self) -> Result<Self::Output, CollectorError>;
-
-    fn name(&self) -> &'static str;
-}
-
 /// Coordinator that runs all cheap collectors in parallel and assembles a RawSnapshot.
 pub struct CollectorSet {
     platform: Platform,

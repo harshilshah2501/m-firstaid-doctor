@@ -29,7 +29,7 @@ pub fn diagnose(f: &FeatureSet) -> Option<Diagnosis> {
     }
 
     // Rule 2: Critical pressure with active swap
-    if f.memory_pressure.as_ref() >= Some(&MemoryPressure::Critical).as_ref()
+    if f.memory_pressure.as_ref().map(|p| *p >= MemoryPressure::Critical).unwrap_or(false)
         && f.swap_used_mb > 1024
     {
         return Some(Diagnosis {

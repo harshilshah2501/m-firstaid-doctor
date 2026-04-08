@@ -137,17 +137,24 @@ async fn cmd_diagnose(
         println!("Running diagnostic on fixture: {}", fixture_path.display());
 
         let features = feature_extractor::extract(&snapshot, &[]);
-        let trigger = trigger_engine::TriggerEngine::new().evaluate(&features);
 
-        if let Some(trigger_event) = trigger {
-            let diagnosis = detector::diagnose(&features, &trigger_event.issue_classes);
-            if json_output {
-                println!("{}", serde_json::to_string_pretty(&diagnosis)?);
-            } else {
-                print_diagnosis_human(&diagnosis);
-            }
+        // Fixture mode: feed the same sample enough times to satisfy hysteresis
+        // (samples_required=3) so the trigger engine can fire on a single snapshot.
+        let mut engine = trigger_engine::TriggerEngine::new();
+        let trigger = (0..3).fold(None, |_, _| engine.evaluate(&features));
+
+        let diagnosis = if let Some(trigger_event) = trigger {
+            detector::diagnose(&features, &trigger_event.issue_classes)
         } else {
+            detector::diagnose(&features, &[])
+        };
+
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&diagnosis)?);
+        } else if diagnosis.diagnoses.is_empty() {
             println!("✓ No issues detected in fixture snapshot.");
+        } else {
+            print_diagnosis_human(&diagnosis);
         }
         return Ok(());
     }
