@@ -7,6 +7,95 @@ use signal_normalizer::{NormalizedSignalSnapshot, MemoryPressure, ThermalState};
 /// The caller passes recent snapshots (newest first).
 pub const HISTORY_WINDOW: usize = 10; // 10 × 30s = 5 minutes
 
+/// Number of numeric features in a temporal feature vector.
+/// Must stay in sync with `to_feature_vec` and `TEMPORAL_FEATURE_NAMES`.
+pub const N_TEMPORAL_FEATURES: usize = 35;
+
+/// Names of temporal features in canonical index order.
+/// Must match the training script (`scripts/train_temporal.py`).
+pub const TEMPORAL_FEATURE_NAMES: &[&str; N_TEMPORAL_FEATURES] = &[
+    "cpu_usage_avg_1m",
+    "cpu_usage_avg_5m",
+    "cpu_usage_avg_15m",
+    "cpu_core_count",
+    "top_process_cpu_pct",
+    "top_process_is_system",
+    "memory_total_mb",
+    "memory_available_mb",
+    "memory_used_pct",
+    "swap_used_mb",
+    "swap_used_pct",
+    "memory_oom_risk",
+    "top_process_rss_mb",
+    "system_disk_free_pct",
+    "system_disk_free_bytes",
+    "smart_failing",
+    "network_reachable",
+    "wifi_signal_dbm",
+    "vpn_active",
+    "proxy_configured",
+    "dns_resolution_fail_rate",
+    "default_gateway_ping_ms",
+    "cpu_temp_celsius",
+    "fan_speed_rpm",
+    "battery_health_pct",
+    "battery_cycle_count",
+    "battery_charge_pct",
+    "startup_items_count",
+    "app_crash_count_1h",
+    "app_crash_count_24h",
+    "service_restart_storm",
+    "service_down_expected",
+    "pending_reboot_required",
+    "recent_update_detected",
+    "update_failed",
+];
+
+/// Flatten a `FeatureSet` into a fixed-length f32 vector for ML models.
+///
+/// Layout follows `TEMPORAL_FEATURE_NAMES` index order.
+/// Optional fields map to 0.0 when absent (except battery fields → -1.0 to
+/// distinguish "not present" from "0% charge").
+pub fn to_feature_vec(f: &FeatureSet) -> Vec<f32> {
+    vec![
+        f.cpu_usage_avg_1m,
+        f.cpu_usage_avg_5m,
+        f.cpu_usage_avg_15m,
+        f.cpu_core_count as f32,
+        f.top_process_cpu_pct,
+        f.top_process_is_system as u8 as f32,
+        f.memory_total_mb as f32,
+        f.memory_available_mb as f32,
+        f.memory_used_pct,
+        f.swap_used_mb as f32,
+        f.swap_used_pct,
+        f.memory_oom_risk as u8 as f32,
+        f.top_process_rss_mb as f32,
+        f.system_disk_free_pct,
+        f.system_disk_free_bytes as f32,
+        f.smart_failing as u8 as f32,
+        f.network_reachable as u8 as f32,
+        f.wifi_signal_dbm.unwrap_or(0) as f32,
+        f.vpn_active as u8 as f32,
+        f.proxy_configured as u8 as f32,
+        f.dns_resolution_fail_rate,
+        f.default_gateway_ping_ms.unwrap_or(0.0),
+        f.cpu_temp_celsius.unwrap_or(0.0),
+        f.fan_speed_rpm.unwrap_or(0) as f32,
+        f.battery_health_pct.unwrap_or(-1.0),
+        f.battery_cycle_count.unwrap_or(0) as f32,
+        f.battery_charge_pct.unwrap_or(-1.0),
+        f.startup_items_count as f32,
+        f.app_crash_count_1h as f32,
+        f.app_crash_count_24h as f32,
+        f.service_restart_storm as u8 as f32,
+        f.service_down_expected as u8 as f32,
+        f.pending_reboot_required as u8 as f32,
+        f.recent_update_detected as u8 as f32,
+        f.update_failed as u8 as f32,
+    ]
+}
+
 /// Extract a `FeatureSet` from a current snapshot and a history window.
 /// `history` is ordered newest-to-oldest, not including `current`.
 pub fn extract(

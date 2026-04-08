@@ -32,13 +32,13 @@
       "version": "1.0.0",
       "path": "models/temporal_anomaly_v1.onnx",
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "input_schema": "float_[30x52]",
+      "input_schema": "float_[30x35]",
       "output_classes": [
-        "HighCpu", "HighMemory", "LowDisk", "AppCrash",
-        "NetworkDns", "BatteryThermal", "ServiceDown",
-        "UpdateIssue", "StartupSlow", "DiskIo", "normal"
+        "HighCpu", "HighMemory", "LowDisk", "DiskIo",
+        "StartupSlow", "AppCrash", "NetworkDns", "ServiceDown",
+        "UpdateIssue", "BatteryThermal"
       ],
-      "description": "MiniPatch-TST Transformer (4L × 64H × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 52-feature FeatureSet window. Fine-tuned locally from 7-day SQLite history.",
+      "description": "MiniPatch-TST Transformer (4L × 64d × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
       "training_script": "scripts/train_temporal.py",
       "size_kb": 2048
     }

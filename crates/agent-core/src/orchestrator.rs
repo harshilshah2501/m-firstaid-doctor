@@ -5,8 +5,12 @@ use crate::config::AgentConfig;
 use audit::{AuditLogger, EventType};
 use collectors::{CollectorSet, Platform};
 use detector::{diagnose, merge_ml};
-use feature_extractor::extract;
-use inference::{AdaptiveThresholds, ModelSessionPool, record_process_observation, should_retrain};
+use feature_extractor::{extract, to_feature_vec};
+use inference::{
+    AdaptiveThresholds, ModelSessionPool,
+    record_process_observation, should_retrain,
+    temporal,
+};
 use remediation::{execute as execute_plan, plan as build_plan, ConsentMethod};
 use signal_normalizer::normalize;
 use storage::Repository;
@@ -29,6 +33,9 @@ pub struct Orchestrator {
     session_id: Uuid,
     /// Lazy-loading ONNX session pool — zero cost when `onnx` feature is off.
     ml_pool: ModelSessionPool,
+    /// Rolling window of feature vectors (oldest first) for temporal anomaly scoring.
+    /// Capped at `temporal::T_MAX` entries; one entry per collection cycle.
+    feature_history: Vec<Vec<f32>>,
 }
 
 impl Orchestrator {
@@ -38,6 +45,7 @@ impl Orchestrator {
             trigger_engine: TriggerEngine::new(),
             session_id: Uuid::new_v4(),
             ml_pool: ModelSessionPool::new(),
+            feature_history: Vec::with_capacity(temporal::T_MAX),
             config,
         }
     }
@@ -106,6 +114,14 @@ impl Orchestrator {
         // ── Step 4: Feature extraction (with history window) ─────────────────
         let history = repo.recent_snapshots(feature_extractor::HISTORY_WINDOW)?;
         let features = extract(&normalized, &history[1..]); // exclude current from history
+
+        // Append current feature vector to the in-memory temporal history ring.
+        // Oldest entries are evicted when the buffer exceeds T_MAX.
+        let fvec = to_feature_vec(&features);
+        if self.feature_history.len() >= temporal::T_MAX {
+            self.feature_history.remove(0);
+        }
+        self.feature_history.push(fvec);
 
         // ── Step 5: Adaptive threshold update + trigger evaluation ───────────
         // Load persisted thresholds, update with current observation, persist.
@@ -197,7 +213,30 @@ impl Orchestrator {
             debug!("Retrain subprocess spawn deferred until model paths are configured");
         }
 
-        let diagnosis = merge_ml(rule_output, &ml_scores, None);
+        // Phase C — MiniPatch-TST temporal anomaly scorer
+        // Score the full feature history window (Ok(None) until model is loaded
+        // or while history is too short — both are handled gracefully).
+        let temporal_score = match inference::score_telemetry_window(
+            &self.feature_history,
+            None,   // model config wired when manifest loader is integrated
+            None,
+        ) {
+            Ok(ts) => ts,
+            Err(e) => {
+                warn!(error = %e, "Temporal scorer failed — rules only");
+                None
+            }
+        };
+
+        if let Some(ref ts) = temporal_score {
+            debug!(
+                anomaly_score = ts.anomaly_score,
+                history_len   = self.feature_history.len(),
+                "Temporal anomaly score computed"
+            );
+        }
+
+        let diagnosis = merge_ml(rule_output, &ml_scores, temporal_score.as_ref());
 
         if diagnosis.is_empty() {
             debug!("Trigger fired but no diagnosis produced — inconclusive");

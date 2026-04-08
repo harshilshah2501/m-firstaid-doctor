@@ -12,6 +12,7 @@
 
 pub mod adaptive;
 pub mod session_pool;
+pub mod temporal;
 pub mod trainer;
 
 pub use adaptive::AdaptiveThresholds;
@@ -178,9 +179,13 @@ pub fn detect_process_anomaly(
 
 /// Multi-variate temporal anomaly scorer (MiniPatch-TST Transformer).
 ///
-/// Phase C: scores a 30-step window of 52-feature FeatureSet time-series.
-/// Returns `Ok(None)` when the model is not configured or `onnx` is disabled.
-/// Feature time-series window: up to 30 FeatureSet entries (oldest first), each 52 floats.
+/// Phase C: scores up to a 30-step window of `N_TEMPORAL_FEATURES`-feature
+/// FeatureSet time-series.
+/// Returns `Ok(None)` when model is not configured, window is too short, or
+/// `onnx` feature is disabled.
+///
+/// `history_features` — feature vectors oldest-first, each produced by
+/// `feature_extractor::to_feature_vec()`.
 pub fn score_telemetry_window(
     history_features: &[Vec<f32>],
     model_config: Option<&ModelConfig>,
@@ -189,11 +194,17 @@ pub fn score_telemetry_window(
     let (Some(config), Some(pool)) = (model_config, pool) else {
         return Ok(None);
     };
-    let _ = (history_features, pool, config);  // suppress warnings until Phase C
+
+    if history_features.len() < temporal::MIN_HISTORY_STEPS {
+        return Ok(None);
+    }
 
     #[cfg(feature = "onnx")]
     {
-        todo!("Phase C: implement MiniPatch-TST temporal anomaly scorer")
+        let start = std::time::Instant::now();
+        return pool.with_session(config, |session| {
+            run_temporal_scorer(history_features, config, session, start)
+        }).map(Some);
     }
 
     #[allow(unreachable_code)]
@@ -380,6 +391,82 @@ fn run_isolation_forest(
     })
 }
 
+// ── Phase C: MiniPatch-TST temporal anomaly implementation ───────────────────
+
+#[cfg(feature = "onnx")]
+fn run_temporal_scorer(
+    history: &[Vec<f32>],
+    config: &ModelConfig,
+    session: &OrtSessionRef<'_>,
+    start: std::time::Instant,
+) -> Result<TelemetryAnomalyScore, InferenceError> {
+    use ort::value::Tensor;
+
+    // Step 1: preprocess window → flat [T_MAX * N_FEATURES] f32 buffer
+    let flat = temporal::preprocess_window(history);
+    let shape = [1usize, temporal::T_MAX, temporal::N_TEMPORAL_FEATURES];
+    let tensor = Tensor::from_array((shape, flat.into_boxed_slice()))
+        .map_err(|e| InferenceError::PreprocessError(format!("temporal tensor: {e}")))?;
+
+    // Step 2: run ORT session
+    let outputs = session
+        .session
+        .run(ort::inputs!["input" => tensor]
+            .map_err(|e| InferenceError::OrtError(format!("inputs macro: {e}")))?)
+        .map_err(|e| InferenceError::OrtError(format!("temporal session run: {e}")))?;
+
+    // Step 3: extract output tensor — shape [1, N_CLASSES]
+    // Each element is a per-IssueClass anomaly probability in [0, 1].
+    let out_tensor = outputs["output"]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| InferenceError::OrtError(format!("temporal output extract: {e}")))?;
+    let raw = out_tensor.as_slice().unwrap_or(&[]);
+
+    // Step 4: build per-class scores using canonical IssueClass order from config.
+    // Fall back to built-in ISSUE_CLASS_ORDER if manifest is missing classes.
+    let class_labels: &[&str] = if config.output_classes.len() >= temporal::N_CLASSES {
+        // Borrow from config — can't directly use as &[&str], map instead.
+        &temporal::ISSUE_CLASS_ORDER
+    } else {
+        temporal::ISSUE_CLASS_ORDER
+    };
+
+    let per_class_scores: Vec<(String, f32)> = class_labels
+        .iter()
+        .enumerate()
+        .map(|(i, &name)| {
+            let score = raw.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            (name.to_string(), score)
+        })
+        .collect();
+
+    // Global anomaly score = max of all per-class scores (no bleed from "normal").
+    let anomaly_score = per_class_scores
+        .iter()
+        .map(|(_, s)| *s)
+        .fold(0.0f32, f32::max);
+
+    // Step 5: identify which features drove the anomaly (coefficient-of-variation heuristic).
+    let top_anomalous_features = temporal::top_anomalous_features(history, 5);
+
+    tracing::debug!(
+        anomaly_score,
+        top_class = per_class_scores
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(c, _)| c.as_str())
+            .unwrap_or("none"),
+        "MiniPatch-TST temporal inference complete"
+    );
+
+    Ok(TelemetryAnomalyScore {
+        anomaly_score,
+        per_class_scores,
+        top_anomalous_features,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -492,5 +579,35 @@ mod tests {
     fn score_telemetry_window_no_config_returns_none() {
         let result = score_telemetry_window(&[], None, None);
         assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn score_telemetry_window_too_short_returns_none() {
+        // Provide a config+pool pair but only 2 steps (< MIN_HISTORY_STEPS=5).
+        // The function must return Ok(None) without attempting ORT inference.
+        use crate::{ModelConfig, ModelSessionPool};
+        let config = ModelConfig {
+            name: "temporal_anomaly_v1".into(),
+            version: "1.0.0".into(),
+            path: std::path::PathBuf::from("/nonexistent/model.onnx"),
+            sha256: "0".repeat(64),
+            input_schema: "float_[30x35]".into(),
+            output_classes: temporal::ISSUE_CLASS_ORDER.iter().map(|s| s.to_string()).collect(),
+        };
+        let pool = ModelSessionPool::new();
+        let history: Vec<Vec<f32>> = vec![vec![0.0; 35]; 2]; // only 2 steps
+        let result = score_telemetry_window(&history, Some(&config), Some(&pool));
+        assert!(matches!(result, Ok(None)), "short window must return None");
+    }
+
+    #[test]
+    fn temporal_preprocess_produces_correct_length() {
+        let history: Vec<Vec<f32>> = vec![vec![1.0; 35]; 10];
+        let flat = temporal::preprocess_window(&history);
+        assert_eq!(
+            flat.len(),
+            temporal::T_MAX * temporal::N_TEMPORAL_FEATURES,
+            "flat buffer must be T_MAX * N_FEATURES floats"
+        );
     }
 }
