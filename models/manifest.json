@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "models": [
+    {
+      "name": "crash_classifier_v1",
+      "version": "1.0.0",
+      "path": "models/crash_classifier_v1.onnx",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "input_schema": "char_onehot_[512x128]",
+      "output_classes": [
+        "HighCpu", "HighMemory", "LowDisk", "AppCrash",
+        "NetworkDns", "BatteryThermal", "ServiceDown",
+        "UpdateIssue", "StartupSlow", "DiskIo"
+      ],
+      "description": "Character-level CNN trained on macOS/Windows crash log text. Input: first 512 chars of crash log, one-hot encoded over 128 ASCII chars. Output: IssueClass logits.",
+      "training_script": "scripts/train_crash_classifier.py",
+      "size_kb": 300
+    },
+    {
+      "name": "process_anomaly_v1",
+      "version": "1.0.0",
+      "path": "models/process_anomaly_v1.onnx",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "input_schema": "float_[1x5]",
+      "output_classes": ["normal", "anomaly"],
+      "description": "Extended Isolation Forest scoring per-process resource usage. Input: [cpu_pct, mem_mb, io_bytes_per_sec, process_age_hours, cpu_trend_5m]. Re-trained weekly from local SQLite history.",
+      "training_script": "scripts/train_process_anomaly.py",
+      "size_kb": 500
+    },
+    {
+      "name": "temporal_anomaly_v1",
+      "version": "1.0.0",
+      "path": "models/temporal_anomaly_v1.onnx",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "input_schema": "float_[30x52]",
+      "output_classes": [
+        "HighCpu", "HighMemory", "LowDisk", "AppCrash",
+        "NetworkDns", "BatteryThermal", "ServiceDown",
+        "UpdateIssue", "StartupSlow", "DiskIo", "normal"
+      ],
+      "description": "MiniPatch-TST Transformer (4L × 64H × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 52-feature FeatureSet window. Fine-tuned locally from 7-day SQLite history.",
+      "training_script": "scripts/train_temporal.py",
+      "size_kb": 2048
+    }
+  ]
+}

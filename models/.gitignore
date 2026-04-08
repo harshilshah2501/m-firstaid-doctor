@@ -1,0 +1,15 @@
+# ONNX model files — not committed to the repo.
+# Obtain via one of:
+#   1. Run the training scripts: python scripts/train_<model>.py
+#   2. Download from the GitHub release page (pre-trained weights)
+#   3. Place your own fine-tuned .onnx files here
+*.onnx
+
+# Intermediate training artifacts
+*.pt
+*.pkl
+*.joblib
+__pycache__/
+*.pyc
+training_runs/
+checkpoints/

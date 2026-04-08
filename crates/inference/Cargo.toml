@@ -10,12 +10,17 @@ thiserror = { workspace = true }
 tracing   = { workspace = true }
 anyhow    = { workspace = true }
 rusqlite  = { workspace = true }
+sha2      = { workspace = true }
+hex       = { workspace = true }
 
-# ONNX Runtime — load-dynamic so ORT shared lib is not statically linked.
-# Feature-gated so Phase 1 builds succeed without ORT installed.
-# ort = { version = "2.0", features = ["load-dynamic"], optional = true }
+# ONNX Runtime — load-dynamic so ORT shared lib is loaded at runtime, not statically linked.
+# Optional: only compiled when --features onnx is passed. The default build works without ORT.
+ort = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [features]
 default = []
-# Enable to build Phase 3 ML inference
-# onnx = ["dep:ort"]
+# Enable to build ONNX model inference (requires ORT shared library at runtime)
+onnx = ["dep:ort"]
