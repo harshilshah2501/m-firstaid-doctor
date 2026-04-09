@@ -4,13 +4,13 @@ use detector::types::DiagnosisOutput;
 use remediation::{RemediationPlan, ExecutionResult};
 use uuid::Uuid;
 
-/// Repository wraps the SQLite connection and provides typed read/write operations.
-pub struct Repository {
-    conn: Connection,
+/// Repository wraps a borrowed SQLite connection and provides typed read/write operations.
+pub struct Repository<'conn> {
+    conn: &'conn Connection,
 }
 
-impl Repository {
-    pub fn new(conn: Connection) -> Self {
+impl<'conn> Repository<'conn> {
+    pub fn new(conn: &'conn Connection) -> Self {
         Self { conn }
     }
 

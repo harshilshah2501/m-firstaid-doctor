@@ -103,7 +103,7 @@ impl Orchestrator {
         let normalized = normalize(&raw);
 
         // ── Step 3: Persist snapshot ─────────────────────────────────────────
-        let repo = Repository::new_ref(conn);
+        let repo = Repository::new(conn);
         repo.save_snapshot(&normalized)?;
 
         audit.log(conn, EventType::CollectionCompleted, serde_json::json!({
@@ -331,15 +331,3 @@ fn filter_autosafe(plan: &remediation::RemediationPlan) -> remediation::Remediat
     filtered
 }
 
-// Extension trait to allow creating a non-owning ref to the repo
-trait RepoExt {
-    fn new_ref(conn: &Connection) -> Repository;
-}
-impl RepoExt for Repository {
-    fn new_ref(conn: &Connection) -> Repository {
-        // Phase 1: pass conn by reference via a shared connection pool.
-        // For now, open a separate in-memory connection to satisfy the type system.
-        // Phase 2: use r2d2 or deadpool-sqlite for proper connection management.
-        todo!("Phase 1: pass conn reference — will be addressed with connection pool in Phase 2")
-    }
-}
