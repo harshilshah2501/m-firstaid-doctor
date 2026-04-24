@@ -41,6 +41,32 @@
       "description": "MiniPatch-TST Transformer (4L × 64d × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
       "training_script": "scripts/train_temporal.py",
       "size_kb": 2048
+    },
+    {
+      "name": "causal_ranker_v1",
+      "version": "1.0.0",
+      "path": "models/causal_ranker_v1.onnx",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "input_schema": "float_[1x35]",
+      "output_schema": "float_[1x100]",
+      "output_classes": [
+        "HighCpu", "HighMemory", "LowDisk", "DiskIo", "StartupSlow",
+        "AppCrash", "NetworkDns", "ServiceDown", "UpdateIssue", "BatteryThermal"
+      ],
+      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10×10 = 100 sigmoid-activated causal strength values (row=cause, col=effect). Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph in crates/detector/src/causal.rs. Deterministic fallback (same static graph) is always active when this model is absent.",
+      "training_script": "scripts/train_causal_ranker.py",
+      "size_kb": 150
+    },
+    {
+      "name": "remediation_selector_v1",
+      "version": "1.0.0",
+      "path": "models/remediation_selector_v1.onnx",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "input_schema": "float_[1 x N_actions x 55]",
+      "output_schema": "float_[1 x N_actions]",
+      "description": "Per-action scoring MLP with shared weights. Input per action: 35-float FeatureSet || 10-float active-class one-hot || 10-float action-type one-hot = 55 floats. Output: predicted effectiveness score in [0,1] per action. Actions are re-ranked by descending score before the plan is persisted. Falls back to the deterministic heuristic scorer when absent.",
+      "training_script": "scripts/train_remediation_selector.py",
+      "size_kb": 80
     }
   ]
 }

@@ -49,6 +49,8 @@ fn plan_cpu(plan: &mut RemediationPlan, d: &detector::types::Diagnosis) {
             reversible: true,
             rollback_note: "No action taken; report only.".into(),
             pre_checks: vec![],
+            ml_score: None,
+            ml_rank: None,
         }
     );
 
@@ -89,6 +91,8 @@ fn plan_cpu(plan: &mut RemediationPlan, d: &detector::types::Diagnosis) {
                     "Verify process is not in D-state (uninterruptible wait)".into(),
                     "Verify process is not on the protected list".into(),
                 ],
+                ml_score: None,
+                ml_rank: None,
             });
         }
     }
@@ -109,6 +113,8 @@ fn plan_memory(plan: &mut RemediationPlan, d: &detector::types::Diagnosis) {
         reversible: true,
         rollback_note: "No action taken.".into(),
         pre_checks: vec![],
+        ml_score: None,
+        ml_rank: None,
     });
 
     plan.recommended_only.push(Recommendation {
@@ -146,6 +152,8 @@ fn plan_disk(plan: &mut RemediationPlan, _d: &detector::types::Diagnosis) {
             "Dry-run: enumerate files to be deleted before proceeding".into(),
             "Verify no target files are currently open by running processes".into(),
         ],
+        ml_score: None,
+        ml_rank: None,
     });
 
     plan.recommended_only.push(Recommendation {
@@ -173,6 +181,8 @@ fn plan_network(plan: &mut RemediationPlan, d: &detector::types::Diagnosis) {
         reversible: true,
         rollback_note: "Read-only probe; no changes made.".into(),
         pre_checks: vec![],
+        ml_score: None,
+        ml_rank: None,
     });
 
     // DNS flush (AutoSafe)
@@ -189,6 +199,8 @@ fn plan_network(plan: &mut RemediationPlan, d: &detector::types::Diagnosis) {
         reversible: true,
         rollback_note: "DNS cache is rebuilt automatically. No permanent change.".into(),
         pre_checks: vec![],
+        ml_score: None,
+        ml_rank: None,
     });
 }
 
@@ -207,6 +219,8 @@ fn plan_battery(plan: &mut RemediationPlan, _d: &detector::types::Diagnosis) {
         reversible: true,
         rollback_note: "No action taken.".into(),
         pre_checks: vec![],
+        ml_score: None,
+        ml_rank: None,
     });
 
     plan.recommended_only.push(Recommendation {

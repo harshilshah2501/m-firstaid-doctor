@@ -11,7 +11,7 @@ use inference::{
     record_process_observation, should_retrain,
     temporal,
 };
-use remediation::{execute as execute_plan, plan as build_plan, ConsentMethod};
+use remediation::{execute as execute_plan, plan as build_plan, score_remediation_actions, ConsentMethod};
 use signal_normalizer::normalize;
 use storage::Repository;
 use trigger_engine::{IssueClass, TriggerEngine};
@@ -266,7 +266,7 @@ impl Orchestrator {
         }))?;
 
         // ── Step 7: Remediation planning ─────────────────────────────────────
-        let plan = build_plan(&diagnosis);
+        let mut plan = build_plan(&diagnosis);
 
         if plan.is_empty() {
             return Ok(DiagnosticCycleResult {
@@ -285,6 +285,17 @@ impl Orchestrator {
             "action_count": plan.actions.len(),
             "recommendation_count": plan.recommended_only.len(),
         }))?;
+
+        // ── Step 7b: ML remediation ranking ──────────────────────────────────
+        // Score and reorder plan.actions by predicted effectiveness.
+        // Heuristic mode is always active; ONNX mode activates when the model
+        // is loaded in the session pool. Falls back silently on any error.
+        let active_classes: Vec<trigger_engine::IssueClass> = diagnosis.diagnoses
+            .iter()
+            .map(|d| d.issue_class.clone())
+            .collect();
+
+        plan.actions = score_remediation_actions(&plan.actions, &active_classes, None);
 
         // ── Step 8: Execute AutoSafe actions immediately ──────────────────────
         // AutoSafe actions (safety_level=0) execute without consent.

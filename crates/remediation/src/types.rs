@@ -48,6 +48,12 @@ pub struct RemediationAction {
     pub reversible: bool,
     pub rollback_note: String,
     pub pre_checks: Vec<String>,
+    /// Predicted effectiveness score from the remediation selector model, in [0.0, 1.0].
+    /// None when the model is not configured or the feature flag is off.
+    pub ml_score: Option<f32>,
+    /// Rank assigned after ML scoring (1 = highest predicted effectiveness).
+    /// None when ml_score is None.
+    pub ml_rank: Option<usize>,
 }
 
 impl RemediationAction {
@@ -64,6 +70,8 @@ impl RemediationAction {
             reversible: false,
             rollback_note: String::new(),
             pre_checks: Vec::new(),
+            ml_score: None,
+            ml_rank: None,
         }
     }
 }

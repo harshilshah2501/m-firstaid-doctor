@@ -10,9 +10,23 @@ pub struct DiagnosisOutput {
     pub snapshot_id: Uuid,
     pub diagnosed_at: DateTime<Utc>,
     pub diagnoses: Vec<Diagnosis>,
+    /// Causal edges between co-occurring issue classes, ordered by strength descending.
+    /// Empty when only one issue is detected (no cross-issue causality possible).
+    pub causal_edges: Vec<CausalEdge>,
     pub detection_method: DetectionMethod,
     pub ml_models_invoked: Vec<String>,
     pub elapsed_ms: u64,
+}
+
+/// A directed causal relationship between two co-occurring issue classes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalEdge {
+    pub cause: IssueClass,
+    pub effect: IssueClass,
+    /// Strength of the causal relationship in [0.0, 1.0].
+    pub strength: f32,
+    /// One-line human-readable explanation surfaced in diagnosis output.
+    pub explanation: String,
 }
 
 impl DiagnosisOutput {

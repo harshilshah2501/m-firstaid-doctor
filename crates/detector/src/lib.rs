@@ -1,7 +1,9 @@
+pub mod causal;
 pub mod ml_merger;
 pub mod rules;
 pub mod types;
 
+pub use causal::build_causal_edges;
 pub use ml_merger::merge_ml;
 pub use types::*;
 
@@ -35,12 +37,16 @@ pub fn diagnose(features: &FeatureSet, triggered_classes: &[IssueClass]) -> Diag
         }
     }
 
+    let active_classes: Vec<IssueClass> = diagnoses.iter().map(|d| d.issue_class.clone()).collect();
+    let causal_edges = causal::build_causal_edges(&active_classes);
+
     DiagnosisOutput {
         schema_version: "1.0".into(),
         diagnosis_id: Uuid::new_v4(),
         snapshot_id: features.snapshot_id,
         diagnosed_at: Utc::now(),
         diagnoses,
+        causal_edges,
         detection_method: DetectionMethod::RulesOnly,
         ml_models_invoked: Vec::new(),
         elapsed_ms: (Utc::now() - started).num_milliseconds() as u64,

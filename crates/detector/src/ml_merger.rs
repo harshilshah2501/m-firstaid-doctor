@@ -244,6 +244,7 @@ mod tests {
             snapshot_id:       Uuid::new_v4(),
             diagnosed_at:      Utc::now(),
             diagnoses,
+            causal_edges:      Vec::new(),
             detection_method:  DetectionMethod::RulesOnly,
             ml_models_invoked: Vec::new(),
             elapsed_ms:        0,
