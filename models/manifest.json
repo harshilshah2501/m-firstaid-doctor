@@ -5,7 +5,7 @@
       "name": "crash_classifier_v1",
       "version": "1.0.0",
       "path": "models/crash_classifier_v1.onnx",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "be5a072dc959adfeb1d93e1b4ddc47f25311487291efb7db10c1804f9890811c",
       "input_schema": "char_onehot_[512x128]",
       "output_classes": [
         "HighCpu",
