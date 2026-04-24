@@ -111,19 +111,19 @@ class WorkloadTrace:
         """A quiet, healthy machine."""
         trace = np.zeros((T, F), dtype=np.float32)
         for t in range(T):
-            trace[t, IDX["cpu_usage_avg_1m"]]  = rng.normal(8,  3).clip(0, 100)
-            trace[t, IDX["cpu_usage_avg_5m"]]  = rng.normal(8,  2).clip(0, 100)
-            trace[t, IDX["cpu_usage_avg_15m"]] = rng.normal(7,  2).clip(0, 100)
+            trace[t, IDX["cpu_usage_avg_1m"]]  = np.clip(rng.normal(8,  3), 0, 100)
+            trace[t, IDX["cpu_usage_avg_5m"]]  = np.clip(rng.normal(8,  2), 0, 100)
+            trace[t, IDX["cpu_usage_avg_15m"]] = np.clip(rng.normal(7,  2), 0, 100)
             trace[t, IDX["cpu_core_count"]]    = 8.0
             trace[t, IDX["memory_total_mb"]]   = 16384.0
-            trace[t, IDX["memory_available_mb"]] = rng.normal(8000, 500).clip(100, 16000)
-            trace[t, IDX["memory_used_pct"]]   = rng.normal(45, 5).clip(5, 95)
-            trace[t, IDX["swap_used_pct"]]     = rng.normal(5, 3).clip(0, 100)
-            trace[t, IDX["system_disk_free_pct"]] = rng.normal(40, 5).clip(1, 99)
+            trace[t, IDX["memory_available_mb"]] = np.clip(rng.normal(8000, 500), 100, 16000)
+            trace[t, IDX["memory_used_pct"]]   = np.clip(rng.normal(45, 5), 5, 95)
+            trace[t, IDX["swap_used_pct"]]     = np.clip(rng.normal(5, 3), 0, 100)
+            trace[t, IDX["system_disk_free_pct"]] = np.clip(rng.normal(40, 5), 1, 99)
             trace[t, IDX["network_reachable"]] = 1.0
-            trace[t, IDX["battery_charge_pct"]] = rng.normal(75, 10).clip(5, 100)
-            trace[t, IDX["battery_health_pct"]] = rng.normal(90, 5).clip(50, 100)
-            trace[t, IDX["cpu_temp_celsius"]]  = rng.normal(55, 5).clip(30, 100)
+            trace[t, IDX["battery_charge_pct"]] = np.clip(rng.normal(75, 10), 5, 100)
+            trace[t, IDX["battery_health_pct"]] = np.clip(rng.normal(90, 5), 50, 100)
+            trace[t, IDX["cpu_temp_celsius"]]  = np.clip(rng.normal(55, 5), 30, 100)
         return trace
 
     @staticmethod
@@ -134,11 +134,11 @@ class WorkloadTrace:
         for t in range(ramp_start, T):
             frac = (t - ramp_start) / max(T - ramp_start, 1)
             cpu = 40 + frac * 55 + rng.normal(0, 3)
-            trace[t, IDX["cpu_usage_avg_1m"]]  = cpu.clip(0, 100)
-            trace[t, IDX["cpu_usage_avg_5m"]]  = (cpu - 5).clip(0, 100)
-            trace[t, IDX["cpu_usage_avg_15m"]] = (cpu - 10).clip(0, 100)
-            trace[t, IDX["top_process_cpu_pct"]] = (cpu * 0.9).clip(0, 100)
-            trace[t, IDX["cpu_temp_celsius"]]  = (55 + frac * 35 + rng.normal(0, 2)).clip(30, 110)
+            trace[t, IDX["cpu_usage_avg_1m"]]  = np.clip(cpu, 0, 100)
+            trace[t, IDX["cpu_usage_avg_5m"]]  = np.clip((cpu - 5), 0, 100)
+            trace[t, IDX["cpu_usage_avg_15m"]] = np.clip((cpu - 10), 0, 100)
+            trace[t, IDX["top_process_cpu_pct"]] = np.clip((cpu * 0.9), 0, 100)
+            trace[t, IDX["cpu_temp_celsius"]]  = np.clip((55 + frac * 35 + rng.normal(0, 2)), 30, 110)
         return trace
 
     @staticmethod
@@ -148,8 +148,8 @@ class WorkloadTrace:
         leak_rate = rng.uniform(100, 500)   # MB per step
         for t in range(T):
             used_pct = 40 + (t * leak_rate / 16384 * 100)
-            trace[t, IDX["memory_used_pct"]]   = used_pct.clip(0, 100)
-            trace[t, IDX["memory_available_mb"]] = (16384 * (1 - used_pct / 100)).clip(0, 16384)
+            trace[t, IDX["memory_used_pct"]]   = np.clip(used_pct, 0, 100)
+            trace[t, IDX["memory_available_mb"]] = np.clip((16384 * (1 - used_pct / 100)), 0, 16384)
             trace[t, IDX["swap_used_pct"]] = max(0, used_pct - 85) * 4 + rng.normal(0, 2)
             if used_pct > 90:
                 trace[t, IDX["memory_oom_risk"]] = 1.0
@@ -231,9 +231,9 @@ class WorkloadTrace:
         """Thermal throttling + battery drain under load."""
         trace = WorkloadTrace.baseline(rng)
         for t in range(T):
-            trace[t, IDX["cpu_temp_celsius"]] = rng.normal(85, 5).clip(70, 110)
+            trace[t, IDX["cpu_temp_celsius"]] = np.clip(rng.normal(85, 5), 70, 110)
             trace[t, IDX["battery_charge_pct"]] = max(5, 90 - t * 3 + rng.normal(0, 2))
-            trace[t, IDX["battery_health_pct"]] = rng.normal(65, 10).clip(20, 100)
+            trace[t, IDX["battery_health_pct"]] = np.clip(rng.normal(65, 10), 20, 100)
         return trace
 
     GENERATORS = {

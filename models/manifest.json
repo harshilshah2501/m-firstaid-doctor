@@ -8,9 +8,16 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "input_schema": "char_onehot_[512x128]",
       "output_classes": [
-        "HighCpu", "HighMemory", "LowDisk", "AppCrash",
-        "NetworkDns", "BatteryThermal", "ServiceDown",
-        "UpdateIssue", "StartupSlow", "DiskIo"
+        "HighCpu",
+        "HighMemory",
+        "LowDisk",
+        "AppCrash",
+        "NetworkDns",
+        "BatteryThermal",
+        "ServiceDown",
+        "UpdateIssue",
+        "StartupSlow",
+        "DiskIo"
       ],
       "description": "Character-level CNN trained on macOS/Windows crash log text. Input: first 512 chars of crash log, one-hot encoded over 128 ASCII chars. Output: IssueClass logits.",
       "training_script": "scripts/train_crash_classifier.py",
@@ -20,9 +27,12 @@
       "name": "process_anomaly_v1",
       "version": "1.0.0",
       "path": "models/process_anomaly_v1.onnx",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "19c7338e8e4a33e946cb7384121b819d8696c6ef39166bb7bef85ac7ff3adfe0",
       "input_schema": "float_[1x5]",
-      "output_classes": ["normal", "anomaly"],
+      "output_classes": [
+        "normal",
+        "anomaly"
+      ],
       "description": "Extended Isolation Forest scoring per-process resource usage. Input: [cpu_pct, mem_mb, io_bytes_per_sec, process_age_hours, cpu_trend_5m]. Re-trained weekly from local SQLite history.",
       "training_script": "scripts/train_process_anomaly.py",
       "size_kb": 500
@@ -34,11 +44,18 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "input_schema": "float_[30x35]",
       "output_classes": [
-        "HighCpu", "HighMemory", "LowDisk", "DiskIo",
-        "StartupSlow", "AppCrash", "NetworkDns", "ServiceDown",
-        "UpdateIssue", "BatteryThermal"
+        "HighCpu",
+        "HighMemory",
+        "LowDisk",
+        "DiskIo",
+        "StartupSlow",
+        "AppCrash",
+        "NetworkDns",
+        "ServiceDown",
+        "UpdateIssue",
+        "BatteryThermal"
       ],
-      "description": "MiniPatch-TST Transformer (4L × 64d × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
+      "description": "MiniPatch-TST Transformer (4L \u00d7 64d \u00d7 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step \u00d7 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
       "training_script": "scripts/train_temporal.py",
       "size_kb": 2048
     },
@@ -50,10 +67,18 @@
       "input_schema": "float_[1x35]",
       "output_schema": "float_[1x100]",
       "output_classes": [
-        "HighCpu", "HighMemory", "LowDisk", "DiskIo", "StartupSlow",
-        "AppCrash", "NetworkDns", "ServiceDown", "UpdateIssue", "BatteryThermal"
+        "HighCpu",
+        "HighMemory",
+        "LowDisk",
+        "DiskIo",
+        "StartupSlow",
+        "AppCrash",
+        "NetworkDns",
+        "ServiceDown",
+        "UpdateIssue",
+        "BatteryThermal"
       ],
-      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10×10 = 100 sigmoid-activated causal strength values (row=cause, col=effect). Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph in crates/detector/src/causal.rs. Deterministic fallback (same static graph) is always active when this model is absent.",
+      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10\u00d710 = 100 sigmoid-activated causal strength values (row=cause, col=effect). Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph in crates/detector/src/causal.rs. Deterministic fallback (same static graph) is always active when this model is absent.",
       "training_script": "scripts/train_causal_ranker.py",
       "size_kb": 150
     },
