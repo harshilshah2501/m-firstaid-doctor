@@ -28,7 +28,9 @@ firstaid.toml
 
 # ONNX models (large binary files — ship separately)
 models/*.onnx
+models/*.onnx.data
 models/*.ort
+models/*.pt
 
 # Test output
 /tmp/
