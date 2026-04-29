@@ -55,7 +55,7 @@
         "UpdateIssue",
         "BatteryThermal"
       ],
-      "description": "MiniPatch-TST Transformer (4L \u00d7 64d \u00d7 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step \u00d7 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
+      "description": "MiniPatch-TST Transformer (4L × 64d × 4-head) pre-trained via Masked Metric Modeling on synthetic OS telemetry. Input: 30-step × 35-feature FeatureSet window (see feature_extractor::TEMPORAL_FEATURE_NAMES). Output: per-IssueClass anomaly scores in [0,1]. Global score = max of per-class scores.",
       "training_script": "scripts/train_temporal.py",
       "size_kb": 2048
     },
@@ -78,7 +78,7 @@
         "UpdateIssue",
         "BatteryThermal"
       ],
-      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10\u00d710 = 100 sigmoid-activated causal strength values, row=cause, col=effect. Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph.",
+      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10×10 = 100 sigmoid-activated causal strength values, row=cause, col=effect. Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph.",
       "training_script": "scripts/train_causal_ranker.py",
       "size_kb": 3
     },
@@ -86,12 +86,12 @@
       "name": "remediation_selector_v1",
       "version": "1.0.0",
       "path": "models/remediation_selector_v1.onnx",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "4964f0c8bbf8b4d837f3a88d8530849e7dcaaba1335391eb87b11494074efaac",
       "input_schema": "float_[1 x N_actions x 55]",
       "output_schema": "float_[1 x N_actions]",
-      "description": "Per-action scoring MLP with shared weights. Input per action: 35-float FeatureSet || 10-float active-class one-hot || 10-float action-type one-hot = 55 floats. Output: predicted effectiveness score in [0,1] per action. Actions are re-ranked by descending score before the plan is persisted. Falls back to the deterministic heuristic scorer when absent.",
+      "description": "Per-action scoring MLP (shared weights). Input per action: 35-float FeatureSet || 10-float active-class one-hot || 10-float action-type one-hot. Output: predicted effectiveness score in [0,1] per action. Trained on synthetic issue/action pairs labeled by domain-rule effectiveness table. Falls back to heuristic scorer when absent.",
       "training_script": "scripts/train_remediation_selector.py",
-      "size_kb": 80
+      "size_kb": 5
     }
   ]
 }
