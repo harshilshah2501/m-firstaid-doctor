@@ -41,7 +41,7 @@
       "name": "temporal_anomaly_v1",
       "version": "1.0.0",
       "path": "models/temporal_anomaly_v1.onnx",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "36f47be266bc14a4d7b568ab171957d54327782f9a800cc203aefe0790a97182",
       "input_schema": "float_[30x35]",
       "output_classes": [
         "HighCpu",
@@ -63,7 +63,7 @@
       "name": "causal_ranker_v1",
       "version": "1.0.0",
       "path": "models/causal_ranker_v1.onnx",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "40eac93a40475b55a73044f19c9ef20d1bcdb890d9c4d93a27c36f6f2e5d89b9",
       "input_schema": "float_[1x35]",
       "output_schema": "float_[1x100]",
       "output_classes": [
@@ -78,9 +78,9 @@
         "UpdateIssue",
         "BatteryThermal"
       ],
-      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10\u00d710 = 100 sigmoid-activated causal strength values (row=cause, col=effect). Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph in crates/detector/src/causal.rs. Deterministic fallback (same static graph) is always active when this model is absent.",
+      "description": "MLP causal adjacency predictor. Input: 35-float FeatureSet snapshot. Output: 10\u00d710 = 100 sigmoid-activated causal strength values, row=cause, col=effect. Trained via synthetic co-occurrence labels derived from the static CAUSAL_RULES graph.",
       "training_script": "scripts/train_causal_ranker.py",
-      "size_kb": 150
+      "size_kb": 3
     },
     {
       "name": "remediation_selector_v1",
