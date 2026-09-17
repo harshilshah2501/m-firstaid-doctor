@@ -14,6 +14,15 @@ A lightweight background agent that observes, diagnoses, and safely remediates t
 - **Minimal footprint:** <30 MB idle RAM, <15 MB binary, <0.1% idle CPU.
 - **Auditable:** Append-only audit log with event chain for every action.
 
+## Desktop UI (Tauri)
+
+A minimal **native window** lives under [`desktop/`](desktop/README.md). It shells out to `firstaid diagnose --ui-bundle` and displays health, snapshot summary, and diagnoses.
+
+```bash
+cargo build -p agent-core
+cd desktop && npm install && npm run tauri dev
+```
+
 ## Quick Start (Phase 1 CLI)
 
 ```bash

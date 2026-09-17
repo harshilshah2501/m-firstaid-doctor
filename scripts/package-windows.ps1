@@ -76,8 +76,20 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 # ── Step 1: Build release binary ─────────────────────────────────────────────
 
 Write-Host ""
-Write-Host "--> Compiling release binary…" -ForegroundColor Green
-rustup target add $Target 2>$null
+Write-Host "--> Compiling release binary..." -ForegroundColor Green
+
+# Avoid stderr-only informational output from rustup being treated as an error
+# under strict PowerShell error settings.
+$InstalledTargets = (& rustup target list --installed 2>$null)
+if ($LASTEXITCODE -ne 0) {
+    throw "rustup target list failed. Ensure rustup is installed and available in PATH."
+}
+if (-not ($InstalledTargets -contains $Target)) {
+    & rustup target add $Target 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "rustup target add failed for target '$Target'"
+    }
+}
 cargo build --release --target $Target -p agent-core
 
 $BinPath = Join-Path $RepoRoot "target\$Target\release\firstaid.exe"
@@ -94,7 +106,9 @@ function Invoke-SignTool([string]$FilePath) {
     $CertPath = $env:CERT_PATH
     $CertPass = $env:CERT_PASSWORD
     if (-not $CertPath) { throw "CERT_PATH env var required for signing" }
-    $SignTool = (Get-Command signtool.exe -ErrorAction SilentlyContinue)?.Source
+    $SignToolCmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    $SignTool = $null
+    if ($SignToolCmd) { $SignTool = $SignToolCmd.Source }
     if (-not $SignTool) {
         # Try common SDK paths
         $SDKPaths = @(
@@ -123,37 +137,148 @@ Invoke-SignTool $BinPath
 # ── Step 3: Build MSI via cargo-wix ─────────────────────────────────────────
 
 $MsiPath = $null
+$CanUseCargoWix = $false
+$IsUncRepoPath = $RepoRoot -match '^\\\\'
 if (-not $SkipMsi) {
     Write-Host ""
     Write-Host "--> Building MSI with cargo-wix…" -ForegroundColor Green
 
-    # Verify prerequisites
-    if (-not (Get-Command "cargo-wix" -ErrorAction SilentlyContinue)) {
-        Write-Warning "cargo-wix not found. Run: cargo install cargo-wix"
-        Write-Warning "Skipping MSI build."
-        $SkipMsi = $true
+    # cargo-wix is optional now; if unavailable or it fails, we fall back
+    # to a direct candle/light build with local staging.
+    # On UNC/WSL paths, cargo-wix commonly fails at light/cab creation.
+    # Prefer the direct WiX fallback immediately for cleaner output.
+    if ($IsUncRepoPath) {
+        Write-Warning "UNC/WSL repository path detected; skipping cargo-wix and using direct WiX build path."
+    } else {
+        $CargoWixCmd = Get-Command "cargo-wix" -ErrorAction SilentlyContinue
+        if ($CargoWixCmd) {
+            $CanUseCargoWix = $true
+        } else {
+            Write-Warning "cargo-wix not found. Will use direct WiX toolchain fallback."
+        }
     }
 }
 
 if (-not $SkipMsi) {
-    # cargo-wix expects to run from the crate directory
+    # Detect WiX Toolset bin folder (must contain candle.exe and light.exe)
+    $WixBinPath = $null
+    $CandleCmd = Get-Command candle.exe -ErrorAction SilentlyContinue
+    if ($CandleCmd) {
+        $WixBinPath = Split-Path -Parent $CandleCmd.Source
+    }
+    if (-not $WixBinPath -and $env:WIX) {
+        $Candidate = Join-Path $env:WIX "bin"
+        if (Test-Path (Join-Path $Candidate "candle.exe")) {
+            $WixBinPath = $Candidate
+        } elseif (Test-Path (Join-Path $env:WIX "candle.exe")) {
+            $WixBinPath = $env:WIX
+        }
+    }
+    if (-not $WixBinPath) {
+        $WixCandidates = @(
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin",
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
+            "${env:ProgramFiles}\WiX Toolset v3.11\bin",
+            "${env:ProgramFiles}\WiX Toolset v3.14\bin"
+        )
+        $WixBinPath = $WixCandidates |
+            Where-Object { Test-Path (Join-Path $_ "candle.exe") } |
+            Select-Object -First 1
+    }
+    if (-not $WixBinPath) {
+        throw "WiX Toolset compiler (candle.exe) not found. Install WiX Toolset 3.x or set WIX/bin in PATH."
+    }
+
     Push-Location (Join-Path $RepoRoot "crates\agent-core")
     try {
-        # Point cargo-wix at our pre-authored WiX source
         $WxsSource = Join-Path $RepoRoot "packaging\windows\main.wxs"
-        $MsiOut     = Join-Path $OutDir "firstaid-$Version-$Target.msi"
+        $MsiOut    = Join-Path $OutDir "firstaid-$Version-$Target.msi"
+        $MsiBuilt  = $false
 
-        cargo wix `
-            --no-build `
-            --nocapture `
-            --target $Target `
-            --output $MsiOut `
-            $WxsSource
+        if (-not (Test-Path $WxsSource)) { throw "WiX source not found: $WxsSource" }
+        if (-not (Test-Path $BinPath))   { throw "Binary not found: $BinPath" }
 
-        if ($LASTEXITCODE -ne 0) { throw "cargo wix failed" }
-        $MsiPath = $MsiOut
-        Write-Host "    MSI: $MsiPath"
-        Invoke-SignTool $MsiPath
+        # cargo-wix auto-discovers wix\main.wxs inside the crate directory.
+        # Copy our canonical WXS there so it is found without any extra flags.
+        $WixDir = Join-Path (Get-Location) "wix"
+        New-Item -ItemType Directory -Force -Path $WixDir | Out-Null
+        Copy-Item -Path $WxsSource -Destination (Join-Path $WixDir "main.wxs") -Force
+
+        if ($CanUseCargoWix) {
+            Write-Host "    cargo wix -p agent-core --bin-path $WixBinPath --nocapture (using wix\main.wxs)"
+            & cargo wix -p agent-core --bin-path $WixBinPath --nocapture
+
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "cargo wix failed (exit $LASTEXITCODE). Falling back to direct candle/light build."
+            } else {
+                # cargo-wix typically writes to target\wix\ — find and relocate the MSI.
+                $SearchRoots = @(
+                    (Join-Path (Get-Location) "target\wix"),
+                    (Join-Path $RepoRoot "target\wix")
+                )
+                $ProducedMsi = $null
+                foreach ($root in $SearchRoots) {
+                    $found = Get-ChildItem -Path $root -Filter "*.msi" -ErrorAction SilentlyContinue |
+                             Sort-Object LastWriteTime -Descending |
+                             Select-Object -First 1
+                    if ($found) { $ProducedMsi = $found; break }
+                }
+
+                if ($ProducedMsi) {
+                    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+                    Copy-Item $ProducedMsi.FullName -Destination $MsiOut -Force
+                    $MsiPath = $MsiOut
+                    Write-Host "    MSI: $MsiPath"
+                    Invoke-SignTool $MsiPath
+                    $MsiBuilt = $true
+                } else {
+                    Write-Warning "cargo wix succeeded but no .msi file was found under target\wix\"
+                }
+            }
+        }
+
+        if (-not $MsiBuilt) {
+            try {
+                # Direct WiX fallback: stage files under local TEMP to avoid UNC/WSL path issues.
+                $StageRoot = Join-Path $env:TEMP ("firstaid-wix-" + [guid]::NewGuid().ToString("N"))
+                New-Item -ItemType Directory -Force -Path $StageRoot | Out-Null
+
+                $StageWxs = Join-Path $StageRoot "main.wxs"
+                $StageExe = Join-Path $StageRoot "firstaid.exe"
+                $StageObj = Join-Path $StageRoot "main.wixobj"
+                $StageMsi = Join-Path $StageRoot "firstaid.msi"
+
+                Copy-Item -Path $BinPath -Destination $StageExe -Force
+
+                $WxsContent = Get-Content -Raw -Path $WxsSource
+                $WxsContent = $WxsContent -replace 'Source="\.\.\\\.\.\\target\\x86_64-pc-windows-msvc\\release\\\$\(var\.BinaryName\)"', 'Source="firstaid.exe"'
+                Set-Content -Path $StageWxs -Value $WxsContent -Encoding UTF8
+
+                $CandleExe = Join-Path $WixBinPath "candle.exe"
+                $LightExe  = Join-Path $WixBinPath "light.exe"
+
+                Write-Host "    candle.exe -arch x64 $StageWxs"
+                & $CandleExe -nologo -arch x64 -out $StageObj $StageWxs
+                if ($LASTEXITCODE -ne 0) { throw "candle failed (exit $LASTEXITCODE)" }
+
+                Write-Host "    light.exe $StageObj"
+                & $LightExe -nologo -ext WixUIExtension -out $StageMsi $StageObj
+                if ($LASTEXITCODE -ne 0) { throw "light failed (exit $LASTEXITCODE)" }
+
+                if (-not (Test-Path $StageMsi)) {
+                    throw "Direct WiX build completed but MSI not found: $StageMsi"
+                }
+
+                New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+                Copy-Item -Path $StageMsi -Destination $MsiOut -Force
+                $MsiPath = $MsiOut
+                Write-Host "    MSI (direct WiX fallback): $MsiPath"
+                Invoke-SignTool $MsiPath
+            } catch {
+                Write-Warning "Direct WiX fallback failed: $($_.Exception.Message)"
+                Write-Warning "Continuing to EXE build."
+            }
+        }
     } finally {
         Pop-Location
     }
@@ -173,7 +298,8 @@ if (-not $SkipExe) {
     )
     $ISCC = $ISSCPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $ISCC) {
-        $ISCC = (Get-Command ISCC.exe -ErrorAction SilentlyContinue)?.Source
+        $ISCCCmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+        if ($ISCCCmd) { $ISCC = $ISCCCmd.Source }
     }
 
     if (-not $ISCC) {
@@ -217,12 +343,16 @@ if ((-not $MsiPath) -and (-not $ExePath)) {
     Write-Warning "No packages were produced. Check prerequisite tools."
 }
 Write-Host ""
-Write-Host "    To test the MSI silently:"
-Write-Host "      msiexec /i '$MsiPath' /quiet /qn"
-Write-Host ""
-Write-Host "    To verify the service was installed:"
-Write-Host "      sc query firstaid"
-Write-Host "      firstaid status"
+if ($MsiPath -and (Test-Path $MsiPath)) {
+    Write-Host "    To test the MSI silently:"
+    Write-Host "      msiexec /i '$MsiPath' /quiet /qn"
+    Write-Host ""
+}
+if ($MsiPath -or $ExePath) {
+    Write-Host "    To verify the service was installed:"
+    Write-Host "      sc query firstaid"
+    Write-Host "      firstaid status"
+}
 
 } finally {
     Pop-Location

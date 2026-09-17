@@ -107,6 +107,17 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
      Tasks: addtopath
 
 [Code]
+// ── Windows service: binPath must quote the .exe when installed under "Program Files"
+function GetScCreateParams(Param: string): string;
+var
+  AppPath, Svc, Exe: string;
+begin
+  AppPath := ExpandConstant('{app}');
+  Svc := ExpandConstant('{#ServiceName}');
+  Exe := ExpandConstant('{#AppExeName}');
+  Result := 'create "' + Svc + '" binPath= "\"' + AppPath + '\' + Exe + '\" service" DisplayName= "FirstAid Doctor Agent" start= auto obj= LocalSystem';
+end;
+
 // ── PATH helper ───────────────────────────────────────────────────────────────
 function NeedsAddToPath(Dir: string): boolean;
 var
@@ -151,9 +162,9 @@ begin
 end;
 
 [Run]
-; Install and start the Windows service after files are copied
+; Install and start the Windows service after files are copied (see GetScCreateParams for quoted binPath)
 Filename: "{sys}\sc.exe"; \
-  Parameters: "create ""{#ServiceName}"" binPath= ""{app}\{#AppExeName} daemon"" DisplayName= ""FirstAid Doctor Agent"" start= auto obj= LocalSystem"; \
+  Parameters: "{code:GetScCreateParams}"; \
   Flags: runhidden; StatusMsg: "Installing FirstAid Doctor service…"
 
 Filename: "{sys}\sc.exe"; \

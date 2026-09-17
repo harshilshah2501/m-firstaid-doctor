@@ -4,7 +4,7 @@
 use crate::config::AgentConfig;
 use audit::{AuditLogger, EventType};
 use collectors::{CollectorSet, Platform};
-use detector::{diagnose, merge_ml};
+use detector::{diagnose, merge_ml, DiagnosisOutput};
 use feature_extractor::{extract, to_feature_vec};
 use inference::{
     AdaptiveThresholds, ModelSessionPool,
@@ -12,7 +12,7 @@ use inference::{
     temporal,
 };
 use remediation::{execute as execute_plan, plan as build_plan, score_remediation_actions, ConsentMethod};
-use signal_normalizer::normalize;
+use signal_normalizer::{normalize, NormalizedSignalSnapshot};
 use storage::Repository;
 use trigger_engine::{IssueClass, TriggerEngine};
 
@@ -52,13 +52,30 @@ impl Orchestrator {
 
     /// Run a single on-demand diagnostic cycle.
     /// Used by `firstaid diagnose` CLI command.
-    pub async fn run_once(&mut self, conn: &Connection) -> Result<DiagnosticCycleResult> {
+    pub async fn run_once(&mut self, conn: &Connection) -> Result<DiagnosticCycleDetail> {
         let mut audit = AuditLogger::new(self.session_id);
         self.run_cycle_internal(conn, &mut audit).await
     }
 
     /// Run the agent in daemon mode — poll every N seconds.
     pub async fn run_daemon(&mut self, conn: &Connection) -> Result<()> {
+        self.run_daemon_inner(conn, None).await
+    }
+
+    /// Same as [`run_daemon`], but exits when `shutdown` becomes `true` (Windows SCM stop).
+    pub(crate) async fn run_daemon_with_shutdown(
+        &mut self,
+        conn: &Connection,
+        shutdown: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<()> {
+        self.run_daemon_inner(conn, Some(shutdown)).await
+    }
+
+    async fn run_daemon_inner(
+        &mut self,
+        conn: &Connection,
+        mut stop: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> Result<()> {
         let mut audit = AuditLogger::new(self.session_id);
         let interval = Duration::from_secs(self.config.poll_interval_seconds);
 
@@ -70,11 +87,18 @@ impl Orchestrator {
         info!(session_id = %self.session_id, "Agent daemon started");
 
         loop {
+            if let Some(rx) = &stop {
+                if *rx.borrow() {
+                    info!(session_id = %self.session_id, "Daemon stopping");
+                    return Ok(());
+                }
+            }
+
             match self.run_cycle_internal(conn, &mut audit).await {
-                Ok(result) => {
-                    if !result.diagnoses_found.is_empty() {
+                Ok(detail) => {
+                    if !detail.inner.diagnoses_found.is_empty() {
                         info!(
-                            issues = ?result.diagnoses_found,
+                            issues = ?detail.inner.diagnoses_found,
                             "Diagnostic cycle found issues"
                         );
                     } else {
@@ -86,7 +110,29 @@ impl Orchestrator {
                 }
             }
 
-            sleep(interval).await;
+            match &mut stop {
+                None => sleep(interval).await,
+                Some(rx) => {
+                    tokio::select! {
+                        _ = Self::wait_for_stop(rx) => {
+                            info!(session_id = %self.session_id, "Daemon stopping");
+                            return Ok(());
+                        }
+                        _ = sleep(interval) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    async fn wait_for_stop(rx: &mut tokio::sync::watch::Receiver<bool>) {
+        loop {
+            if *rx.borrow() {
+                return;
+            }
+            if rx.changed().await.is_err() {
+                return;
+            }
         }
     }
 
@@ -94,7 +140,7 @@ impl Orchestrator {
         &mut self,
         conn: &Connection,
         audit: &mut AuditLogger,
-    ) -> Result<DiagnosticCycleResult> {
+    ) -> Result<DiagnosticCycleDetail> {
         // ── Step 1: Collect ──────────────────────────────────────────────────
         debug!("Collecting signals");
         let raw = self.collector_set.collect_all().await;
@@ -145,12 +191,17 @@ impl Orchestrator {
 
         let trigger = self.trigger_engine.evaluate(&features, adaptive.as_ref());
         let Some(trigger_event) = trigger else {
-            return Ok(DiagnosticCycleResult {
-                snapshot_id: normalized.snapshot_id,
-                triggered: false,
-                diagnoses_found: Vec::new(),
-                plan_id: None,
-                executed: false,
+            let diagnosis = diagnose(&features, &[]);
+            return Ok(DiagnosticCycleDetail {
+                inner: DiagnosticCycleResult {
+                    snapshot_id: normalized.snapshot_id,
+                    triggered: false,
+                    diagnoses_found: Vec::new(),
+                    plan_id: None,
+                    executed: false,
+                },
+                normalized,
+                diagnosis,
             });
         };
 
@@ -240,12 +291,16 @@ impl Orchestrator {
 
         if diagnosis.is_empty() {
             debug!("Trigger fired but no diagnosis produced — inconclusive");
-            return Ok(DiagnosticCycleResult {
-                snapshot_id: normalized.snapshot_id,
-                triggered: true,
-                diagnoses_found: Vec::new(),
-                plan_id: None,
-                executed: false,
+            return Ok(DiagnosticCycleDetail {
+                inner: DiagnosticCycleResult {
+                    snapshot_id: normalized.snapshot_id,
+                    triggered: true,
+                    diagnoses_found: Vec::new(),
+                    plan_id: None,
+                    executed: false,
+                },
+                normalized,
+                diagnosis,
             });
         }
 
@@ -269,12 +324,16 @@ impl Orchestrator {
         let mut plan = build_plan(&diagnosis);
 
         if plan.is_empty() {
-            return Ok(DiagnosticCycleResult {
-                snapshot_id: normalized.snapshot_id,
-                triggered: true,
-                diagnoses_found: found_classes,
-                plan_id: Some(plan.plan_id),
-                executed: false,
+            return Ok(DiagnosticCycleDetail {
+                inner: DiagnosticCycleResult {
+                    snapshot_id: normalized.snapshot_id,
+                    triggered: true,
+                    diagnoses_found: found_classes,
+                    plan_id: Some(plan.plan_id),
+                    executed: false,
+                },
+                normalized,
+                diagnosis,
             });
         }
 
@@ -316,12 +375,16 @@ impl Orchestrator {
             false
         };
 
-        Ok(DiagnosticCycleResult {
-            snapshot_id: normalized.snapshot_id,
-            triggered: true,
-            diagnoses_found: found_classes,
-            plan_id: Some(plan_id),
-            executed,
+        Ok(DiagnosticCycleDetail {
+            inner: DiagnosticCycleResult {
+                snapshot_id: normalized.snapshot_id,
+                triggered: true,
+                diagnoses_found: found_classes,
+                plan_id: Some(plan_id),
+                executed,
+            },
+            normalized,
+            diagnosis,
         })
     }
 }
@@ -333,6 +396,14 @@ pub struct DiagnosticCycleResult {
     pub diagnoses_found: Vec<String>,
     pub plan_id: Option<uuid::Uuid>,
     pub executed: bool,
+}
+
+/// Full outcome of one diagnostic cycle (for CLI / UI export).
+#[derive(Debug)]
+pub struct DiagnosticCycleDetail {
+    pub inner: DiagnosticCycleResult,
+    pub normalized: NormalizedSignalSnapshot,
+    pub diagnosis: DiagnosisOutput,
 }
 
 fn filter_autosafe(plan: &remediation::RemediationPlan) -> remediation::RemediationPlan {

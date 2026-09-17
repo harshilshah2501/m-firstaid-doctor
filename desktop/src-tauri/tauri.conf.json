@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FirstAid Doctor",
+  "version": "0.1.0",
+  "identifier": "com.firstaid.doctor.ui",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "FirstAid Doctor",
+        "width": 1000,
+        "height": 720,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "icon": [],
+    "targets": "all"
+  },
+  "plugins": {}
+}

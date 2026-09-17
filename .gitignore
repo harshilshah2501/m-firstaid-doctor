@@ -35,3 +35,8 @@ models/*.pt
 # Test output
 /tmp/
 /tests/output/
+
+# Tauri desktop UI
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/

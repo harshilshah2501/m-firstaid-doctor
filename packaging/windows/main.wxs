@@ -12,7 +12,7 @@
     Build:
       cargo install cargo-wix
       cd crates\agent-core
-      cargo wix --nocapture --output ..\..\dist\windows\firstaid-<version>-x86_64.msi
+      cargo wix (for example, with no-capture and output options)
 
     Or use scripts\package-windows.ps1 which automates the above.
 
@@ -21,7 +21,9 @@
                     /f cert.pfx /p <password>
                     dist\windows\firstaid-<version>-x86_64.msi
 -->
+<?ifndef Version ?>
 <?define Version="0.1.0" ?>
+<?endif?>
 <?define Manufacturer="FirstAid Doctor Contributors" ?>
 <?define ProductName="FirstAid Doctor" ?>
 <?define Description="Local-first endpoint health diagnostics and remediation" ?>
@@ -31,8 +33,7 @@
 <?define BinaryName="firstaid.exe" ?>
 <?define UpgradeCode="E3A7C1D2-8F4B-4E9A-B2C5-6D0F3A1E7B94" ?>
 
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
-     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
 
   <Product Id="*"
            Name="$(var.ProductName)"
@@ -102,7 +103,7 @@
             Start="auto"
             Account="LocalSystem"
             ErrorControl="normal"
-            Arguments="daemon"
+            Arguments="service"
             Interactive="no" />
 
         <!-- Start service on install, stop+delete on uninstall -->
@@ -125,32 +126,18 @@
             System="yes" />
       </Component>
 
-      <!-- ORT shared library (optional — only bundled when present) -->
-      <Component Id="OrtDll" Guid="B2C3D4E5-F6A7-8901-BCDE-F23456789012">
-        <Condition>ORT_DLL_PRESENT</Condition>
-        <File Id="OnnxRuntimeDll"
-              Name="onnxruntime.dll"
-              Source="..\..\ort\onnxruntime.dll"
-              KeyPath="yes" />
-      </Component>
-
     </DirectoryRef>
 
     <!-- Data directory (ProgramData\FirstAid Doctor) — kept on uninstall -->
     <DirectoryRef Id="DATAROOTDIR">
       <Component Id="DataDir" Guid="C3D4E5F6-A7B8-9012-CDEF-345678901234">
         <CreateFolder />
-        <!-- Grant LocalSystem full control, Users read-only -->
-        <util:PermissionEx GenericAll="yes" User="SYSTEM" />
-        <util:PermissionEx GenericRead="yes" GenericExecute="yes" User="Users" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="LOGDIR">
       <Component Id="LogDir" Guid="D4E5F6A7-B8C9-0123-DEF0-456789012345">
         <CreateFolder />
-        <util:PermissionEx GenericAll="yes" User="SYSTEM" />
-        <util:PermissionEx GenericRead="yes" GenericExecute="yes" User="Users" />
       </Component>
     </DirectoryRef>
 
@@ -182,13 +169,7 @@
       <ComponentRef Id="DataDir" />
       <ComponentRef Id="LogDir" />
       <ComponentRef Id="StartMenuShortcut" />
-    </Feature>
-
-    <Feature Id="OrtFeature"
-             Title="ONNX Runtime"
-             Level="1"
-             Description="ML inference engine (required for AI-powered diagnostics)">
-      <ComponentRef Id="OrtDll" />
+      <ComponentRef Id="RegistryEntries" />
     </Feature>
 
     <!-- ── UI ──────────────────────────────────────────────────────────── -->
@@ -206,26 +187,13 @@
       <![CDATA[Installed OR (VersionNT >= 603)]]>
     </Condition>
 
-    <!-- Detect ORT DLL presence for conditional component -->
-    <Property Id="ORT_DLL_PRESENT" Value="0" />
-    <SetProperty Id="ORT_DLL_PRESENT" Value="1"
-                 After="AppSearch">
-      <![CDATA[ORT_DLL_PATH]]>
-    </SetProperty>
-    <AppSearch>
-      <Property Id="ORT_DLL_PATH">
-        <FileSearch Name="onnxruntime.dll" />
-      </Property>
-    </AppSearch>
-
     <!-- ── Registry: version stamp (for installers and scripts) ─────────── -->
 
     <DirectoryRef Id="TARGETDIR">
       <Component Id="RegistryEntries"
                  Guid="F6A7B8C9-D0E1-2345-F012-678901234567">
         <RegistryKey Root="HKLM"
-                     Key="SOFTWARE\FirstAidDoctor"
-                     Action="createAndRemoveOnUninstall">
+                     Key="SOFTWARE\FirstAidDoctor">
           <RegistryValue Name="Version"     Type="string"  Value="$(var.Version)" />
           <RegistryValue Name="InstallPath" Type="string"  Value="[INSTALLFOLDER]" />
           <RegistryValue Name="DataPath"    Type="string"  Value="[DATAROOTDIR]" />

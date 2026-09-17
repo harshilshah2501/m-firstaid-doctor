@@ -3,6 +3,10 @@
 
 mod config;
 mod orchestrator;
+mod ui_bundle;
+
+#[cfg(windows)]
+mod win_svc;
 
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt};
@@ -15,7 +19,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     /// Path to config file (TOML)
     #[arg(long, global = true)]
@@ -37,6 +41,9 @@ enum Command {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Output versioned UI bundle JSON (for tray / Electron apps)
+        #[arg(long)]
+        ui_bundle: bool,
     },
     /// Show last known health state
     Status,
@@ -69,8 +76,17 @@ enum Command {
     Daemon,
 }
 
+fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() == Some("service") {
+        return win_svc::run();
+    }
+
+    main_async()
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main_async() -> anyhow::Result<()> {
     // Initialize structured logging
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env()
@@ -90,9 +106,19 @@ async fn main() -> anyhow::Result<()> {
 
     let conn = storage::open(&config.db_path)?;
 
-    match cli.command {
-        Command::Diagnose { json } => {
-            cmd_diagnose(&config, &conn, json, cli.fixture).await?;
+    let launched_without_subcommand = cli.command.is_none();
+    let command = cli.command.unwrap_or(Command::Diagnose {
+        json: false,
+        ui_bundle: false,
+    });
+
+    if launched_without_subcommand {
+        println!("No command supplied. Running a default diagnostic now.\n");
+    }
+
+    match command {
+        Command::Diagnose { json, ui_bundle } => {
+            cmd_diagnose(&config, &conn, json, ui_bundle, cli.fixture).await?;
         }
         Command::Status => {
             cmd_status(&conn).await?;
@@ -113,17 +139,37 @@ async fn main() -> anyhow::Result<()> {
             cmd_verify_audit(&conn)?;
         }
         Command::Daemon => {
-            println!("Daemon mode: Phase 2 — not yet implemented");
+            let mut orch = orchestrator::Orchestrator::new(config.clone());
+            orch.run_daemon(&conn).await?;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if launched_without_subcommand {
+            pause_before_exit();
         }
     }
 
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn pause_before_exit() {
+    use std::io::{self, Write};
+
+    print!("\nPress Enter to close this window...");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    let _ = io::stdin().read_line(&mut input);
+}
+
 async fn cmd_diagnose(
     config: &config::AgentConfig,
     conn: &rusqlite::Connection,
     json_output: bool,
+    ui_bundle_output: bool,
     fixture: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     let mut orch = orchestrator::Orchestrator::new(config.clone());
@@ -144,11 +190,28 @@ async fn cmd_diagnose(
         let mut engine = trigger_engine::TriggerEngine::new();
         let trigger = (0..3).fold(None, |_, _| engine.evaluate(&features, None));
 
-        let diagnosis = if let Some(trigger_event) = trigger {
+        let diagnosis = if let Some(trigger_event) = &trigger {
             detector::diagnose(&features, &trigger_event.issue_classes)
         } else {
             detector::diagnose(&features, &[])
         };
+
+        if ui_bundle_output {
+            let cycle = orchestrator::DiagnosticCycleResult {
+                snapshot_id: diagnosis.snapshot_id,
+                triggered: trigger.is_some(),
+                diagnoses_found: diagnosis
+                    .diagnoses
+                    .iter()
+                    .map(|d| format!("{:?}", d.issue_class))
+                    .collect(),
+                plan_id: None,
+                executed: false,
+            };
+            let bundle = ui_bundle::UiBundle::from_fixture(snapshot, diagnosis, cycle);
+            println!("{}", serde_json::to_string_pretty(&bundle)?);
+            return Ok(());
+        }
 
         if json_output {
             println!("{}", serde_json::to_string_pretty(&diagnosis)?);
@@ -161,13 +224,21 @@ async fn cmd_diagnose(
     }
 
     // Real collection mode
-    println!("Running endpoint diagnostic...\n");
-    let result = orch.run_once(conn).await?;
+    if !ui_bundle_output {
+        println!("Running endpoint diagnostic...\n");
+    }
+    let detail = orch.run_once(conn).await?;
 
-    if result.diagnoses_found.is_empty() {
+    if ui_bundle_output {
+        let bundle = ui_bundle::UiBundle::from_live_cycle(detail);
+        println!("{}", serde_json::to_string_pretty(&bundle)?);
+        return Ok(());
+    }
+
+    if detail.inner.diagnoses_found.is_empty() {
         println!("✓ No issues detected. Your endpoint appears healthy.");
     } else {
-        println!("Issues detected: {:?}", result.diagnoses_found);
+        println!("Issues detected: {:?}", detail.inner.diagnoses_found);
         println!("\nRun 'firstaid plan' to see recommended actions.");
     }
 
@@ -206,7 +277,7 @@ fn cmd_verify_audit(conn: &rusqlite::Connection) -> anyhow::Result<()> {
     }
 }
 
-fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<config::AgentConfig> {
+pub(crate) fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<config::AgentConfig> {
     if let Some(p) = path {
         let content = std::fs::read_to_string(p)?;
         Ok(toml::from_str(&content)?)

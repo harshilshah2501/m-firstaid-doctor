@@ -243,6 +243,18 @@ Check Windows Event Viewer for the error, or run the binary in the foreground to
 & "$env:ProgramFiles\FirstAid Doctor\firstaid.exe" daemon
 ```
 
+### EXE window closes immediately when double-clicked
+
+`firstaid.exe` is primarily a CLI tool. When launched without arguments, it now runs a default `diagnose` pass and then waits for Enter before closing.
+
+For regular usage, open PowerShell and run explicit commands:
+
+```powershell
+firstaid diagnose
+firstaid status
+firstaid --help
+```
+
 ### Database corruption
 
 If the SQLite database is corrupted:
